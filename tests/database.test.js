@@ -60,8 +60,10 @@ test('proof reference prevents reusing same payment reference for the method',()
   db.close();
 });
 test('utilities validate admin privileges and input',()=>{
-  assert.equal(isAdmin({ADMIN_IDS:'101, 103'},101),true);
-  assert.equal(isAdmin({ADMIN_IDS:'101, 103'},104),false);
+  assert.equal(isAdmin({ADMIN_ID:'101'},101),true);
+  assert.equal(isAdmin({ADMIN_ID:'101'},104),false);
+  assert.equal(isAdmin({ADMIN_IDS:'101,103'},101),false); // no multiple-owner fallback
+  assert.equal(isAdmin({ADMIN_ID:''},101),false);
   assert.equal(positiveInt('0042'),42);
   assert.equal(positiveInt('-1'),null);
   assert.ok(formatIQD(25000).includes('25,000'));

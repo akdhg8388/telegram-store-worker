@@ -2,15 +2,17 @@ import {button,keyboard,backRow,adminIds,isAdmin,positiveInt,short,formatStars,f
 import {telegram,sendText,answerCallback,queueNotification,flushOutbox} from './telegram.js';
 import {ensureUser,getUser,setSession,getSession,clearSession,getProduct,audit} from './database.js';
 import * as ui from './ui.js';
+import {handleAdminCallback,handleAdminText} from './admin-controls.js';
+import {getSetting,storeAcceptsOrders} from './settings.js';
 
-async function notifyAdmins(db,env,text,photoFileId=null) {
+async function notifyAdmins(db,env,text,photoFileId=null,markup=null) {
   for(const admin of adminIds(env)) {
-    if(photoFileId) await queueNotification(db,'sendPhoto',{chat_id:admin,photo:photoFileId,caption:short(text,950)});
-    else await queueNotification(db,'sendMessage',{chat_id:admin,text:short(text,3900)});
+    if(photoFileId) await queueNotification(db,'sendPhoto',{chat_id:admin,photo:photoFileId,caption:short(text,950),...(markup?{reply_markup:markup}:{})});
+    else await queueNotification(db,'sendMessage',{chat_id:admin,text:short(text,3900),...(markup?{reply_markup:markup}:{})});
   }
 }
 async function notifyUser(db,uid,text) {
-  await queueNotification(db,'sendMessage',{chat_id:uid,text:short(text,3900)});
+  await queueNotification(db,'sendMessage',{chat_id:uid,text:short(text,3900),...(markup?{reply_markup:markup}:{})});
 }
 async function writeTopup(db,env,ctx,uid,session,photoFileId=null,photoUniqueId=null) {
   const {method,amount,reference=null} = session.payload;
@@ -27,7 +29,7 @@ async function writeTopup(db,env,ctx,uid,session,photoFileId=null,photoUniqueId=
   await clearSession(db,uid);
   const u=await getUser(db,uid);
   const text=`🔔 طلب شحن جديد #${id}\n\n👤 ${short(u?.first_name,100)}\n🔗 ${u?.username?'@'+u.username:'بلا معرف'}\n🆔 ${uid}\n💳 ${moneyMethods[method]}\n💰 ${formatIQD(amount)}\n🔢 رقم التحويل: ${short(reference||'غير متوفر',150)}\n📎 إثبات: ${photoFileId?'صورة مرفقة':'رقم تحويل فقط'}\n⏳ الحالة: بانتظار التحقق من التحويل الفعلي.\n\nلإدارة الطلب: /admin`;
-  await notifyAdmins(db,env,text,photoFileId);
+  await notifyAdmins(db,env,text,photoFileId,keyboard([button('✅ قبول',`topup_approve:${id}`,'success'),button('❌ رفض',`topup_reject:${id}`,'danger')]));
   ctx.waitUntil(flushOutbox(db,env));
   return sendText(env,uid,`✅ تم تسجيل طلب الشحن رقم #${id}.\n\n${formatIQD(amount)} — ${moneyMethods[method]}\nسيُراجع المدير وصول التحويل ثم يتخذ القرار.`,keyboard(backRow()));
 }
@@ -91,6 +93,10 @@ async function handleMessage(db,env,ctx,message){
   const uid=message.from?.id;
   if(!uid || !message.chat || message.chat.type!=='private') return;
   await ensureUser(db,message.from);
+  if(!isAdmin(env,uid)){
+    const user=await getUser(db,uid);
+    if(user?.is_blocked)return sendText(env,uid,'⛔ تم إيقاف استخدام هذا الحساب. للمراجعة تواصل مع الدعم.');
+  }
   const text=String(message.text??'').trim();
   if(text.startsWith('/start')){
     await clearSession(db,uid);
@@ -104,9 +110,15 @@ async function handleMessage(db,env,ctx,message){
   if(text==='/admin')return adminMenu(db,env,uid);
   if(text==='/orders')return ui.orders(db,env,uid);
   if(text==='/wallet')return ui.wallet(db,env,uid);
-  if(text==='/support'){await setSession(db,uid,'support');return sendText(env,uid,'🎧 اكتب رسالتك الآن. للإلغاء استخدم /cancel.');}
+  if(text==='/support'){
+    await setSession(db,uid,'support');
+    const instructions=await getSetting(db,'support_instructions','');
+    return sendText(env,uid,`🎧 اكتب رسالتك الآن. للإلغاء استخدم /cancel.${instructions?'\n\n'+short(instructions,1000):''}`);
+  }
   if(text==='/paysupport')return sendText(env,uid,'💳 للمساعدة بشأن مدفوعات Telegram Stars أرسل /support واكتب رقم الطلب ومشكلتك.');
-  if(text==='/terms')return sendText(env,uid,'📜 شروط مبدئية: لا يتم تسليم المنتج إلا بعد دفعه وموافقة المدير. تختلف شروط المنتجات حسب مزود الخدمة. للاستفسار أو طلب استرداد، استخدم /support. يجب تحديث الشروط وسياسة الخصوصية قبل الإطلاق العام.');
+  if(text==='/terms')return sendText(env,uid,await getSetting(db,'terms_text','📜 شروط مبدئية: لا يتم التسليم إلا بعد الدفع وموافقة المدير. تختلف الشروط حسب المنتج. للدعم: /support. حدّث الشروط قبل التشغيل العام.'));
+  if(text==='/privacy')return sendText(env,uid,await getSetting(db,'privacy_text','🔐 سيتم تحديث سياسة الخصوصية قبل استقبال العملاء.'));
+  if(text==='/id')return sendText(env,uid,`🆔 معرف حسابك الرقمي في تيليجرام هو: ${uid}`);
   if(text.startsWith('/reply ') && isAdmin(env,uid)){
     const match=text.match(/^\/reply\s+(\d+)\s+([\s\S]+)$/);
     if(!match)return sendText(env,uid,'صيغة الرد: /reply TELEGRAM_ID نص الرد');
@@ -126,6 +138,7 @@ async function handleMessage(db,env,ctx,message){
   }
   const session=await getSession(db,uid);
   if(session){
+    if(session.action.startsWith('owner_') && await handleAdminText(db,env,uid,session,message))return;
     if(message.photo?.length && session.action==='topup_proof') {
       const pic=message.photo.at(-1);
       return writeTopup(db,env,ctx,uid,session,pic.file_id,pic.file_unique_id);
@@ -142,12 +155,19 @@ async function adminMenu(db,env,uid){
     db.prepare("SELECT count(*) n FROM topup_requests WHERE status='pending'").first(),
     db.prepare("SELECT count(*) n FROM orders WHERE status='awaiting_admin'").first()
   ]);
-  return sendText(env,uid,`🛡️ لوحة تحكم المدير\n\n💳 طلبات الشحن المعلقة: ${topups?.n||0}\n🛍️ طلبات الشراء المعلقة: ${orders?.n||0}`,keyboard(
-    [button('💳 طلبات الشحن','admin_topups')],
-    [button('🛍️ طلبات الشراء','admin_orders')],
+  return sendText(env,uid,`🛡️ لوحة تحكم المدير — خاصة بك
+
+💳 طلبات الشحن المعلقة: ${topups?.n||0}
+🛍️ طلبات الشراء المعلقة: ${orders?.n||0}
+
+🔒 الصلاحية محصورة في Telegram ID المحدد في Cloudflare.`,keyboard(
+    [button('🛍️ طلبات الشراء','admin_orders','primary'),button('💳 طلبات الشحن','admin_topups')],
     [button('📦 بانتظار التسليم','admin_delivery')],
+    [button('📦 المنتجات والأسعار','admin_products:0'),button('📂 الأقسام','admin_manage_categories')],
     [button('➕ إضافة منتج','admin_addproduct'),button('➕ إضافة قسم','admin_addcategory')],
-    [button('📋 قائمة الأقسام وأرقامها','admin_categories')],backRow()));
+    [button('⚙️ الإعدادات والتعليمات','admin_settings:0','primary')],
+    [button('📊 الإحصائيات','admin_stats'),button('🔎 البحث عن عميل','admin_find_user')],
+    [button('📖 دليل الإدارة','admin_help')],backRow()));
 }
 async function adminList(db,env,uid,type){
   if(!isAdmin(env,uid))return sendText(env,uid,'⛔ صلاحيات غير كافية.');
@@ -201,7 +221,9 @@ async function decideOrder(db,env,uid,id,approve){
   if(!res.meta?.changes)return sendText(env,uid,'⚠️ الطلب عولج سابقاً أو لم يعد معلقاً.');
   await audit(db,uid,approve?'approve':'reject','order',id);
   const o=await db.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
-  await notifyUser(db,o.user_tg_id,approve?`✅ وافق المدير على طلبك #${id}.\nأصبح بإمكانك الدفع باستخدام Telegram Stars من خلال زر «طلباتي».`:`❌ رفض المدير طلبك #${id}. لم تُفرض عليك أي رسوم.`);
+  const paymentInfo=approve?await getSetting(db,'payment_instructions',''):'';
+  await notifyUser(db,o.user_tg_id,approve?`✅ وافق المدير على طلبك #${id}.
+أصبح بإمكانك الدفع باستخدام Telegram Stars من خلال زر «طلباتي».${paymentInfo?'\n\n'+short(paymentInfo,1000):''}`:`❌ رفض المدير طلبك #${id}. لم تُفرض عليك أي رسوم.`);
   return sendText(env,uid,`✅ ${approve?'تم قبول':'تم رفض'} الطلب #${id}.`);
 }
 async function deliverOrder(db,env,uid,id){
@@ -210,7 +232,10 @@ async function deliverOrder(db,env,uid,id){
   if(!res.meta?.changes)return sendText(env,uid,'⚠️ الطلب غير موجود أو لم يُدفع أو تم تسليمه بالفعل.');
   await audit(db,uid,'deliver','order',id);
   const o=await db.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
-  await notifyUser(db,o.user_tg_id,`✅ تم تحديد طلبك #${id} كمكتمل من المدير. إذا لم تستلم الخدمة، راسل /support.`);
+  const product=await db.prepare('SELECT delivery_instructions FROM products WHERE id=?').bind(o.product_id).first();
+  const general=await getSetting(db,'delivery_instructions','');
+  const details=[general,product?.delivery_instructions].filter(Boolean).map(x=>short(x,1400)).join('\n\n');
+  await notifyUser(db,o.user_tg_id,`✅ تم تحديد طلبك #${id} كمكتمل من المدير.${details?'\n\n📦 تعليمات التسليم:\n'+details:''}\n\nإذا لم تستلم الخدمة، راسل /support.`);
   return sendText(env,uid,`✅ تم إتمام الطلب #${id}.`);
 }
 async function refundOrder(db,env,uid,id){
@@ -231,23 +256,35 @@ async function refundOrder(db,env,uid,id){
 }
 async function handleCallback(db,env,ctx,q){
   const uid=q.from?.id;
-  if(!uid)return;
+  if(!uid || (q.message && q.message.chat?.type!=='private'))return;
+  // Answer the callback in parallel with database work for a responsive interface.
+  ctx.waitUntil(answerCallback(env,q.id).catch(e=>console.error('callback acknowledgement',String(e))));
   await ensureUser(db,q.from);
-  // Answer immediately; expensive database work happens afterwards.
-  try{await answerCallback(env,q.id)}catch(e){console.error('callback acknowledgement',String(e))}
+  if(!isAdmin(env,uid)){
+    const user=await getUser(db,uid);
+    if(user?.is_blocked)return;
+  }
   const data=String(q.data||'');
-  if(data==='home'){await clearSession(db,uid);return ui.home(db,env,uid)}
-  if(data==='categories')return ui.categories(db,env,uid);
-  if(data==='featured')return ui.products(db,env,uid,0,null,null,true);
-  if(data==='profile')return ui.profile(db,env,uid);
-  if(data==='wallet')return ui.wallet(db,env,uid);
-  if(data==='transactions')return ui.transactions(db,env,uid);
-  if(data==='orders')return ui.orders(db,env,uid);
-  if(data==='favorites')return ui.favorites(db,env,uid);
-  if(data==='products:0' || /^products:\d+$/.test(data))return ui.products(db,env,uid,Math.min(100,Number(data.split(':')[1])));
+  if(await handleAdminCallback(db,env,uid,data))return;
+  if(data==='home'){await clearSession(db,uid);return ui.home(db,env,uid,q.message?.message_id)}
+  if(data==='categories')return ui.categories(db,env,uid,q.message?.message_id);
+  if(data==='featured')return ui.products(db,env,uid,0,null,null,true,q.message?.message_id);
+  if(data==='profile')return ui.profile(db,env,uid,q.message?.message_id);
+  if(data==='wallet')return ui.wallet(db,env,uid,q.message?.message_id);
+  if(data==='transactions')return ui.transactions(db,env,uid,q.message?.message_id);
+  if(data==='orders')return ui.orders(db,env,uid,q.message?.message_id);
+  if(data==='favorites')return ui.favorites(db,env,uid,q.message?.message_id);
+  if(data==='products:0' || /^products:\d+$/.test(data))return ui.products(db,env,uid,Math.min(100,Number(data.split(':')[1])),null,null,false,q.message?.message_id);
   if(data==='search'){await setSession(db,uid,'search');return sendText(env,uid,'🔎 أدخل اسم المنتج الذي تبحث عنه. للإلغاء /cancel.');}
-  if(data==='support'){await setSession(db,uid,'support');return sendText(env,uid,'🎧 أرسل رسالتك الآن. للإلغاء /cancel.');}
-  if(data==='news')return env.NEWS_URL?.startsWith('https://')?sendText(env,uid,`📢 قناة الأخبار: ${env.NEWS_URL}`,keyboard(backRow())):sendText(env,uid,'لم يضف المدير قناة أخبار بعد.',keyboard(backRow()));
+  if(data==='support'){
+    await setSession(db,uid,'support');
+    const instructions=await getSetting(db,'support_instructions','');
+    return sendText(env,uid,`🎧 أرسل رسالتك الآن. للإلغاء /cancel.${instructions?'\n\n'+short(instructions,1000):''}`);
+  }
+  if(data==='news'){
+    const url=await getSetting(db,'news_url',env.NEWS_URL||'');
+    return url.startsWith('https://')?sendText(env,uid,`📢 قناة الأخبار: ${url}`,keyboard(backRow())):sendText(env,uid,'لم يضف المدير قناة أخبار بعد.',keyboard(backRow()));
+  }
   if(data==='language')return sendText(env,uid,'🌐 اللغة الحالية: العربية\n\nسيتم دعم لغات إضافية بترجمة كاملة في تحديث لاحق.',keyboard([button('🇮🇶 العربية','language_ar')],backRow()));
   if(data==='language_ar')return sendText(env,uid,'✅ اللغة العربية مفعّلة.',keyboard(backRow()));
   if(data==='referrals'){
@@ -257,40 +294,55 @@ async function handleCallback(db,env,ctx,q){
   }
   if(data.startsWith('category:')){
     const m=data.match(/^category:(\d+):(\d+)$/);
-    if(m)return ui.products(db,env,uid,Math.min(Number(m[2]),100),Number(m[1]));
+    if(m)return ui.products(db,env,uid,Math.min(Number(m[2]),100),Number(m[1]),null,false,q.message?.message_id);
   }
-  if(data.startsWith('product:'))return ui.productView(db,env,uid,Number(data.split(':')[1]));
+  if(data.startsWith('product:'))return ui.productView(db,env,uid,Number(data.split(':')[1]),q.message?.message_id);
   if(data.startsWith('favorite:')){
     const productId=positiveInt(data.split(':')[1]);if(!productId)return;
     const p=await getProduct(db,productId);if(!p)return;
     const existing=await db.prepare('SELECT 1 AS ok FROM favorites WHERE user_tg_id=? AND product_id=?').bind(uid,productId).first();
     if(existing)await db.prepare('DELETE FROM favorites WHERE user_tg_id=? AND product_id=?').bind(uid,productId).run();
     else await db.prepare('INSERT OR IGNORE INTO favorites(user_tg_id,product_id) VALUES (?,?)').bind(uid,productId).run();
-    return ui.productView(db,env,uid,productId);
+    return ui.productView(db,env,uid,productId,q.message?.message_id);
   }
   if(data.startsWith('buy:')){
+    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر لا يستقبل طلبات جديدة حالياً.');
     const id=positiveInt(data.split(':')[1]),p=id?await getProduct(db,id):null;
     if(!p || p.stock===0)return sendText(env,uid,'هذا المنتج غير متوفر حالياً.');
-    return sendText(env,uid,`🛒 تأكيد الطلب\n\n${short(p.title,100)}\nالمدة: ${p.duration_months||'حسب الخدمة'} شهر\nالكمية: 1\nالسعر: ${formatStars(p.price_stars)}\n\nسيُراجع المدير طلبك قبل السماح بالدفع والتسليم.`,keyboard([button('✅ إرسال طلب للمدير',`confirm_buy:${p.id}`,'success')],[button('↩️ عودة للمنتج',`product:${p.id}`)]));
+    const instr=await getSetting(db,'purchase_instructions','');
+    return sendText(env,uid,`🛒 تأكيد الطلب
+
+${short(p.title,100)}
+المدة: ${p.duration_months||'حسب الخدمة'} شهر
+الكمية: 1
+السعر: ${formatStars(p.price_stars)}
+
+سيُراجع المدير طلبك قبل السماح بالدفع والتسليم.${instr?'\n\n'+short(instr,1000):''}`,keyboard([button('✅ إرسال طلب للمدير',`confirm_buy:${p.id}`,'success')],[button('↩️ عودة للمنتج',`product:${p.id}`)]));
   }
   if(data.startsWith('confirm_buy:')){
+    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ تم إيقاف الطلبات الجديدة مؤقتاً.');
     const id=positiveInt(data.split(':')[1]),p=id?await getProduct(db,id):null;
     if(!p || p.stock===0)return sendText(env,uid,'هذا المنتج لم يعد متاحاً.');
     const res=await db.prepare('INSERT OR IGNORE INTO orders(user_tg_id,product_id,quantity,unit_price_stars,total_stars,source_callback_id) VALUES (?,?,?,?,?,?)').bind(uid,p.id,1,p.price_stars,p.price_stars,q.id).run();
     const oid=res.meta?.changes ? res.meta.last_row_id : (await db.prepare('SELECT id FROM orders WHERE source_callback_id=?').bind(q.id).first())?.id;
     if(!res.meta?.changes) return sendText(env,uid,`تم تسجيل هذا الطلب مسبقاً برقم #${oid}.`);
-    await notifyAdmins(db,env,`🛍️ طلب شراء جديد #${oid}\n👤 العميل: ${uid}\n🛍️ المنتج: ${short(p.title,160)}\n💰 السعر: ${formatStars(p.price_stars)}\n📦 الكمية: 1\n⏳ ينتظر موافقة المدير.\n\nللمراجعة: /admin`);
+    await notifyAdmins(db,env,`🛍️ طلب شراء جديد #${oid}
+👤 العميل: ${uid}
+🛍️ المنتج: ${short(p.title,160)}
+💰 السعر: ${formatStars(p.price_stars)}
+📦 الكمية: 1
+⏳ ينتظر موافقة المدير.`,null,keyboard([button('✅ قبول',`order_approve:${oid}`,'success'),button('❌ رفض',`order_reject:${oid}`,'danger')]));
     ctx.waitUntil(flushOutbox(db,env));
     return sendText(env,uid,`✅ تم إنشاء طلبك #${oid}.\n\nبانتظار موافقة المدير. لن يُطلب منك الدفع قبل الموافقة.`,keyboard([button('📦 طلباتي','orders')],backRow()));
   }
   if(data.startsWith('pay:'))return invoice(db,env,uid,Number(data.split(':')[1]));
   if(data==='topup'){
     if(env.ENABLE_MANUAL_TOPUPS!=='true')return sendText(env,uid,'⛔ الشحن اليدوي غير مفعّل حالياً. الدفع مقابل المنتجات الرقمية يتم عبر Telegram Stars.',keyboard(backRow()));
-    return ui.topupMethods(env,uid);
+    return ui.topupMethods(db,env,uid,q.message?.message_id);
   }
   if(data.startsWith('topup_method:')){
     const method=data.split(':')[1];if(!moneyMethods[method])return;
-    return ui.topupAmounts(env,uid,method);
+    return ui.topupAmounts(db,env,uid,method,q.message?.message_id);
   }
   if(data.startsWith('topup_custom:')){
     const method=data.split(':')[1];if(!moneyMethods[method])return;

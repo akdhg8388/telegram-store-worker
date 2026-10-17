@@ -13,6 +13,20 @@ export async function telegram(env, method, params) {
 export const sendText = (env, chat_id, text, reply_markup) => telegram(env, 'sendMessage', {
   chat_id, text: String(text).slice(0, 4000), ...(reply_markup ? {reply_markup} : {})
 });
+export async function sendOrEditText(env, chat_id, text, reply_markup, message_id) {
+  if (!Number.isSafeInteger(message_id) || message_id <= 0) return sendText(env,chat_id,text,reply_markup);
+  try {
+    return await telegram(env,'editMessageText',{
+      chat_id,message_id,text:String(text).slice(0,4000),...(reply_markup?{reply_markup}:{})
+    });
+  }catch(error){
+    const msg=String(error);
+    if(/message is not modified/i.test(msg))return null;
+    if(/message to edit not found|message can't be edited|message identifier is not specified/i.test(msg))
+      return sendText(env,chat_id,text,reply_markup);
+    throw error;
+  }
+}
 export const answerCallback = (env, callback_query_id, text) => telegram(env,'answerCallbackQuery',{
   callback_query_id, ...(text ? {text: String(text).slice(0,190)} : {})
 });

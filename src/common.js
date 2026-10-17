@@ -14,7 +14,9 @@ export const orderNames = {
   delivered: '✅ مكتمل', rejected: '❌ مرفوض', refunded: '↩️ مسترد'
 };
 export function adminIds(env) {
-  return String(env.ADMIN_IDS ?? '').split(',').map(x=>x.trim()).filter(x=>/^\d+$/.test(x));
+  // Exactly one private owner ID, supplied as a Cloudflare secret; fail closed.
+  const id=String(env.ADMIN_ID ?? '').trim();
+  return /^\d+$/.test(id) && id !== '0' ? [id] : [];
 }
 export function isAdmin(env, userId) { return adminIds(env).includes(String(userId)); }
 export function pagination(page, count, prefix) {
