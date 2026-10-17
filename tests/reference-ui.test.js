@@ -7,7 +7,7 @@ import {backRow} from '../src/common.js';
 
 function createTestDb(){
   const conn=new DatabaseSync(':memory:');
-  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql'])
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql'])
     conn.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   conn.prepare("INSERT INTO users(tg_id,first_name) VALUES (101,'Owner')").run();
   const db={prepare(sql){const stmt=conn.prepare(sql);let values=[];
@@ -63,7 +63,5 @@ test('wallet does not expose a dead-end recharge button when recharge disabled',
 });
 
 test('back navigation uses the supported danger button style',()=>{
- assert.deepEqual(backRow().map(b=>b.callback_data),['home','categories','orders']);
- assert.equal(backRow()[0].style,'danger');
- assert.ok(backRow().every(b=>b.style));
+ assert.deepEqual(backRow(),[{text:'↩️ الرجوع للرئيسية',callback_data:'home',style:'danger'}]);
 });

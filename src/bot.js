@@ -1,4 +1,4 @@
-import {button,keyboard,backRow,persistentMenu,adminIds,isAdmin,positiveInt,short,formatStars,formatIQD,moneyMethods,orderNames} from './common.js';
+import {button,keyboard,backRow,adminIds,isAdmin,positiveInt,short,formatStars,formatIQD,moneyMethods,orderNames} from './common.js';
 import {telegram,sendText,sendOrEditText,answerCallback,queueNotification,flushOutbox} from './telegram.js';
 import {ensureUser,getUser,setSession,getSession,clearSession,getProduct,audit} from './database.js';
 import * as ui from './ui.js';
@@ -103,41 +103,11 @@ async function handleMessage(db,env,ctx,message){
     if(user?.is_blocked)return sendText(env,uid,'⛔ تم إيقاف استخدام هذا الحساب. للمراجعة تواصل مع الدعم.');
   }
   const text=String(message.text??'').trim();
-  // Persistent reply keyboard shortcuts always override a pending edit/search state.
-  const quickNav = {
-    '🏠 الرئيسية':'home','🛍️ المتجر':'categories','📦 طلباتي':'orders',
-    '💳 محفظتي':'wallet','👤 حسابي':'profile','🎧 الدعم':'support',
-    '🛡️ الإدارة':'admin'
-  };
-  if(Object.hasOwn(quickNav,text)){
-    await clearSession(db,uid);
-    const target=quickNav[text];
-    if(target==='home')return ui.home(db,env,uid);
-    if(target==='categories')return ui.categories(db,env,uid);
-    if(target==='orders')return ui.orders(db,env,uid);
-    if(target==='wallet')return ui.wallet(db,env,uid);
-    if(target==='profile')return ui.profile(db,env,uid);
-    if(target==='admin')return adminMenu(db,env,uid);
-    await setSession(db,uid,'support');
-    return sendText(env,uid,'🎧 أرسل رسالتك للدعم. للعودة استخدم 🏠 الرئيسية.');
-  }
-  if(text==='/menu'){
-    await clearSession(db,uid);
-    await sendText(env,uid,'🧭 قائمة التنقل السريع متاحة أسفل المحادثة.',persistentMenu(isAdmin(env,uid)));
-    await db.prepare('UPDATE users SET nav_keyboard_sent=1 WHERE tg_id=?').bind(uid).run();
-    return ui.home(db,env,uid);
-  }
   if(text.startsWith('/start')){
     await clearSession(db,uid);
     const ref=text.match(/^\/start(?:@\w+)?\s+ref_(\d+)$/)?.[1];
     if(ref && ref!==String(uid)) {
       await db.prepare('INSERT OR IGNORE INTO referrals(user_tg_id,referrer_tg_id) SELECT ?,tg_id FROM users WHERE tg_id=?').bind(uid,ref).run();
-    }
-    // A reply keyboard and an inline keyboard require separate Telegram messages.
-    const member=await getUser(db,uid);
-    if(!member?.nav_keyboard_sent){
-      await sendText(env,uid,'🧭 تم تفعيل اختصارات التنقل الدائمة. يمكنك استعادتها لاحقاً بأمر /menu.',persistentMenu(isAdmin(env,uid)));
-      await db.prepare('UPDATE users SET nav_keyboard_sent=1 WHERE tg_id=?').bind(uid).run();
     }
     return ui.home(db,env,uid);
   }
@@ -181,7 +151,7 @@ async function handleMessage(db,env,ctx,message){
     const result=await handleTextState(db,env,ctx,uid,message,session);
     if(result!==null)return result;
   }
-  if(message.photo?.length)return sendText(env,uid,'للشحن، افتح 💳 محفظتي أولاً.');
+  if(message.photo?.length)return sendText(env,uid,'للشحن، افتح 👛 محفظتي أولاً.');
   return sendText(env,uid,'اختر أحد الأقسام من القائمة الرئيسية أو اكتب /start.',keyboard([button('🏠 الرئيسية','home')]));
 }
 async function adminMenu(db,env,uid,messageId=null){

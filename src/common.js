@@ -2,21 +2,10 @@ export const formatIQD = value => `${Number(value || 0).toLocaleString('en-US')}
 export const formatStars = value => `${Number(value || 0).toLocaleString('en-US')} ⭐`;
 export const short = (value, max = 700) => String(value ?? '').slice(0, max);
 export const positiveInt = value => /^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
-export const button = (text, callback_data, style='primary') => ({ text, callback_data, ...(style ? { style } : {}) });
-export const urlButton = (text, url, style='primary') => ({ text, url, ...(style ? {style} : {}) });
+export const button = (text, callback_data, style) => ({ text, callback_data, ...(style ? { style } : {}) });
+export const urlButton = (text, url) => ({ text, url });
 export const keyboard = (...rows) => ({ inline_keyboard: rows.filter(x => x?.length) });
-export const backRow = () => [button('🏠 الرئيسية', 'home', 'danger'),button('🛍️ المتجر','categories','primary'),button('📦 طلباتي','orders','primary')];
-
-// Telegram reply keyboard stays available under the message input even after inline menus change.
-export function persistentMenu(isOwner=false) {
-  const item=(text,style='primary')=>({text,style});
-  const keyboard=[
-    [item('🏠 الرئيسية','success'),item('🛍️ المتجر','success'),item('📦 طلباتي')],
-    [item('💳 محفظتي','success'),item('👤 حسابي'),item('🎧 الدعم')],
-  ];
-  if(isOwner)keyboard.push([item('🛡️ الإدارة','primary')]);
-  return {keyboard,resize_keyboard:true,is_persistent:true,one_time_keyboard:false,input_field_placeholder:'اختر قسماً أو اكتب رسالة'};
-}
+export const backRow = () => [button('↩️ الرجوع للرئيسية', 'home', 'danger')];
 export const moneyMethods = { asiacell: 'آسيا سيل', zaincash: 'زين كاش', superqi: 'سوبر كي' };
 export const orderNames = {
   awaiting_admin: '⏳ بانتظار موافقة المدير',
