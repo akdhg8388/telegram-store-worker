@@ -186,13 +186,16 @@ async function adminMenu(db,env,uid,messageId=null){
     db.prepare("SELECT count(*) n FROM topup_requests WHERE status='pending'").first(),
     db.prepare("SELECT count(*) n FROM orders WHERE status='awaiting_admin'").first()
   ]);
+  const topupsActive=await isTopupEnabled(db,env);
   return sendOrEditText(env,uid,`🛡️ لوحة تحكم المدير — خاصة بك
+
+✅ تم التحقق من حساب المدير. لديك صلاحية إدارة هذا المتجر.
 
 💳 طلبات الشحن المعلقة: ${topups?.n||0}
 🛍️ طلبات الشراء المعلقة: ${orders?.n||0}
-
-🔒 الصلاحية محصورة في Telegram ID المحدد في Cloudflare.`,keyboard(
+🔌 طلبات الشحن: ${topupsActive?'🟢 مفعّلة':'🔴 غير مفعّلة — افتح إعداد الشحن لتفعيلها.'}`,keyboard(
     [button('🛍️ طلبات الشراء','admin_orders','primary'),button('💳 طلبات الشحن','admin_topups','success')],
+    [button('⚙️ إعداد شحن المحفظة','admin_topup_setup','primary')],
     [button('📦 بانتظار التسليم','admin_delivery')],
     [button('📦 المنتجات والأسعار','admin_products:0'),button('📂 الأقسام','admin_manage_categories')],
     [button('➕ إضافة منتج','admin_addproduct'),button('➕ إضافة قسم','admin_addcategory')],
@@ -200,11 +203,17 @@ async function adminMenu(db,env,uid,messageId=null){
     [button('📊 الإحصائيات','admin_stats'),button('🔎 البحث عن عميل','admin_find_user')],
     [button('📖 دليل الإدارة','admin_help')],backRow()),messageId);
 }
-async function adminList(db,env,uid,type){
+async function adminList(db,env,uid,type,messageId=null){
   if(!isAdmin(env,uid))return sendText(env,uid,'⛔ صلاحيات غير كافية.');
   if(type==='topups'){
     const rows=(await db.prepare("SELECT t.*,u.first_name,u.username FROM topup_requests t JOIN users u ON u.tg_id=t.user_tg_id WHERE t.status='pending' ORDER BY t.id LIMIT 10").all()).results??[];
-    if(!rows.length)return sendText(env,uid,'✅ لا توجد طلبات شحن معلقة.',keyboard([button('🛡️ الإدارة','admin')],backRow()));
+    if(!rows.length)return sendOrEditText(env,uid,'💳 طلبات شحن المحفظة\n\n✅ لا توجد طلبات شحن معلّقة حالياً.\n\nعند إرسال العميل طلباً مع رقم التحويل أو صورة الإيصال، سيظهر هنا لتراجعه ثم توافق عليه أو ترفضه.',keyboard(
+      [button('🔄 تحديث الطلبات','admin_topups','primary')],
+      [button('⚙️ إعداد شحن المحفظة','admin_topup_setup','primary')],
+      [button('🛡️ لوحة المدير','admin','primary')],backRow()),messageId);
+    await sendOrEditText(env,uid,`💳 طلبات الشحن المعلّقة: ${rows.length}${rows.length===10?' (آخر 10 طلبات)':''}\n\nستصلك تفاصيل الطلبات مع أزرار القبول والرفض في الرسائل التالية. تحقّق من وصول التحويل قبل الموافقة.`,keyboard(
+      [button('🔄 تحديث','admin_topups','primary'),button('⚙️ إعداد الشحن','admin_topup_setup','primary')],
+      [button('🛡️ لوحة المدير','admin','primary')]),messageId);
     for(const r of rows){
       await sendText(env,uid,`💳 طلب شحن #${r.id}\n👤 ${short(r.first_name,80)} (${r.user_tg_id})\n@${r.username||'بدون_معرف'}\n💰 ${formatIQD(r.amount_iqd)}\nالوسيلة: ${moneyMethods[r.method]}\n🗓️ وقت الطلب: ${baghdadDate(r.created_at)}\nرقم التحويل: ${short(r.transfer_reference||'غير متوفر',120)}\n⚠️ تحقّق من وصول التحويل بنفسك قبل الموافقة.`,keyboard(
         [button('✅ قبول',`topup_approve:${r.id}`,'success'),button('❌ رفض',`topup_reject:${r.id}`,'danger')],
@@ -442,9 +451,9 @@ ${short(p.title,100)}
     return writeTopup(db,env,ctx,uid,session,q.message?.message_id);
   }
   if(data==='admin')return adminMenu(db,env,uid,q.message?.message_id);
-  if(data==='admin_topups')return adminList(db,env,uid,'topups');
-  if(data==='admin_orders')return adminList(db,env,uid,'orders');
-  if(data==='admin_delivery')return adminList(db,env,uid,'delivery');
+  if(data==='admin_topups')return adminList(db,env,uid,'topups',q.message?.message_id);
+  if(data==='admin_orders')return adminList(db,env,uid,'orders',q.message?.message_id);
+  if(data==='admin_delivery')return adminList(db,env,uid,'delivery',q.message?.message_id);
   if(data==='admin_categories'){
     if(!isAdmin(env,uid))return;
     const cats=(await db.prepare('SELECT * FROM categories ORDER BY id').all()).results??[];

@@ -8,7 +8,7 @@ const adminBack=[button('🛡️ لوحة المدير','admin')];
 const backTo=(destination)=>[button('⬅️ رجوع',destination)];
 
 export function adminRoute(data){
-  return /^(?:admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function stats(db,env,uid,messageId=null){
@@ -131,11 +131,49 @@ async function userLookup(db,env,uid,input,messageId=null){
     [button(u.is_blocked?'✅ رفع الحظر':'⛔ حظر الحساب',`admin_user_toggle:${userId}`,u.is_blocked?'success':'danger')],adminBack));
 }
 
+// A single guided page avoids making the owner search through pages of settings.
+async function topupSetup(db,env,uid,messageId=null){
+  const rate=await usdRate(db);
+  const enabled=(await getSetting(db,'manual_topups_enabled',env.ENABLE_MANUAL_TOPUPS||'false'))==='true';
+  const methods=[
+    ['zain_balance','📱 رصيد زين','zain_balance_receiver'],
+    ['superqi','🏦 سوبر كي','superqi_receiver'],
+    ['binance','🟡 Binance','binance_receiver']
+  ];
+  const receivers=await Promise.all(methods.map(async ([method,label])=>({method,label,ready:!!(await receiverFor(db,env,method))})));
+  const count=receivers.filter(m=>m.ready).length;
+  const status=enabled?'🟢 تعمل وتستقبل طلبات الشحن':'🔴 متوقفة عن استقبال طلبات الشحن';
+  const checklist=`${rate?'✅':'❌'} سعر الصرف: ${rate?'1 USD = '+formatIQD(rate):'لم يُحدد'}\n`+
+    `${count?'✅':'❌'} حسابات الاستلام المضبوطة: ${count} من ${methods.length}\n`+
+    `${enabled?'✅':'⏳'} تفعيل استقبال الطلبات`;
+  const rows=[
+    [button('💱 تعديل سعر الصرف','admin_setting_edit:usd_rate_iqd','primary')],
+    ...(!rate?[[button('✅ اعتماد 1 دولار = 1,520 د.ع','admin_rate_1520','success')]]:[]),
+    ...methods.map(([,label,key],i)=>[button((receivers[i].ready?'✅ ':'➕ ')+label,`admin_setting_edit:${key}`,'primary')]),
+    [button(enabled?'⏸️ تعطيل طلبات الشحن':'✅ تفعيل طلبات الشحن','admin_toggle_topups',enabled?'danger':'success')],
+    [button('📥 مراجعة طلبات الشحن','admin_topups','primary')],
+    [button('🛡️ لوحة المدير','admin','primary')]
+  ];
+  const note=rate===1520?'سعر 1,520 هو السعر الرسمي المعلن لبيع الدولار للجمهور، وليس بالضرورة سعر السوق أو سعر استلام تحويلاتك.':'يمكنك اعتماد 1,520 كسعر مرجعي معلن أو إدخال سعر مختلف بنفسك. لا يُطبّق الاقتراح إلا عند ضغط زر اعتماده.';
+  return sendOrEditText(env,uid,`⚙️ إعداد شحن المحفظة\n\nالحالة: ${status}\n\n${checklist}\n\n${note}\n\nلتشغيل الشحن: تأكد من السعر واملأ بيانات استلام وسيلة واحدة على الأقل، ثم اضغط تفعيل. لا يُضاف رصيد إلا بعد قبولك طلباً موثّقاً.`,keyboard(...rows),messageId);
+}
+
 // Returns true if the callback was recognized, including denied admin access.
 export async function handleAdminCallback(db,env,uid,data,messageId=null){
   if(!adminRoute(data) && !data.startsWith('admin_setting_edit:'))return false;
   if(!isAdmin(env,uid)){await sendText(env,uid,'⛔ هذا الإجراء غير متاح.');return true;}
-  if(data==='admin_stats')await stats(db,env,uid,messageId);
+  if(data==='admin_topup_setup')await topupSetup(db,env,uid,messageId);
+  else if(data==='admin_rate_1520'){
+    // Old callbacks must never overwrite an explicit owner rate.
+    if(await usdRate(db)){
+      await sendText(env,uid,'⚠️ سعر الصرف محدد بالفعل. لتغييره استخدم «تعديل سعر الصرف» من إعداد الشحن.');
+      return true;
+    }
+    await updateSetting(db,'usd_rate_iqd','1520',uid);
+    await audit(db,uid,'set_usd_rate_1520','setting',0);
+    await topupSetup(db,env,uid,messageId);
+  }
+  else if(data==='admin_stats')await stats(db,env,uid,messageId);
   else if(data.startsWith('admin_settings'))await settings(db,env,uid,Math.min(10,positiveInt(data.split(':')[1])??0),messageId);
   else if(data==='admin_toggle_store'){
     const current=await getSetting(db,'store_enabled','true');
@@ -149,13 +187,13 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
       const rate=await usdRate(db);
       const receivers=await Promise.all(['zain_balance','superqi','binance'].map(m=>receiverFor(db,env,m)));
       if(!rate || !receivers.some(Boolean)){
-        await sendText(env,uid,'⚠️ قبل تفعيل الشحن، حدّد سعر الدولار بالدينار ووسيلة استلام واحدة على الأقل من إعدادات المدير.');
+        await sendText(env,uid,'⚠️ لا يمكن تفعيل الشحن بعد: '+(!rate?'حدّد سعر الدولار. ':'')+(!receivers.some(Boolean)?'وأضف رقم أو حساب استلام واحداً على الأقل.':'') ,keyboard([button('⚙️ فتح إعداد الشحن','admin_topup_setup','primary')]));
         return true;
       }
     }
     await updateSetting(db,'manual_topups_enabled',current==='true'?'false':'true',uid);
     await audit(db,uid,'toggle_manual_topups','setting',0);
-    await settingDetail(db,env,uid,'manual_topups_enabled',messageId);
+    await topupSetup(db,env,uid,messageId);
   }
   else if(data.startsWith('admin_setting_edit:')){
     const key=data.substring('admin_setting_edit:'.length);
@@ -233,7 +271,9 @@ export async function handleAdminText(db,env,uid,session,message){
     await updateSetting(db,key,valid.value,uid);
     await audit(db,uid,'edit_'+key,'setting',0);
     await clearSession(db,uid);
-    await sendText(env,uid,`✅ تم حفظ الإعداد: ${SETTING_FIELDS[key].label}`,keyboard([button('⚙️ الإعدادات','admin_settings:0')],adminBack));
+    await sendText(env,uid,`✅ تم حفظ الإعداد: ${SETTING_FIELDS[key].label}`,keyboard(
+      [button('⚙️ إعداد الشحن','admin_topup_setup','primary')],
+      [button('⚙️ جميع الإعدادات','admin_settings:0','primary')],adminBack));
     return true;
   }
   if(session.action==='owner_product_field'){
