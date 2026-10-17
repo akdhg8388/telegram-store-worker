@@ -1,8 +1,7 @@
 import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
-import {sendOrEditText,sendOrEditRichHome} from './telegram.js';
-import {richHomeNeeded,richHomeMessage} from './rich-home.js';
+import {sendOrEditText} from './telegram.js';
 import {getSetting,storeAcceptsOrders} from './settings.js';
 import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,renderHomeTemplate,decimalMoney,decoratedMessage,decoratedHome,decorateProductText} from './presentation.js';
 import {loadVisualSettings,homeActionButton,homeUrlButton,withButtonIcon,emojiId} from './home-buttons.js';
@@ -46,14 +45,7 @@ export async function home(db,env,uid,messageId=null) {
   };
   const template=lang==='en'?(visual.home_template_en||DEFAULT_HOME_TEMPLATE_EN):(visual.home_template||DEFAULT_HOME_TEMPLATE);
   const decorated=await decoratedHome(db,renderHomeTemplate(template,values),visual.home_custom_emoji_id||'');
-  const markup=keyboard(...rows);
-  const displayOptions={...decorated.options,preserveText:lang==='en'};
-  // Only Arabic home pages with a pasted LEADING animated emoji use the
-  // experimental rich buttons. All other store pages retain the V15 layout.
-  if(lang==='ar'&&richHomeNeeded(rows))return sendOrEditRichHome(env,uid,
-    richHomeMessage(decorated.text,decorated.options?.entities||[],rows),
-    decorated.text,markup,messageId,displayOptions);
-  return sendOrEditText(env,uid,decorated.text,markup,messageId,displayOptions);
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,{...decorated.options,preserveText:lang==='en'});
 }
 export async function categories(db,env,uid,messageId=null) {
   const cats=await listCategories(db);
