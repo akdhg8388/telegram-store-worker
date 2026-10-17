@@ -2,6 +2,7 @@ import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMeth
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
 import {sendOrEditText} from './telegram.js';
 import {getSetting,storeAcceptsOrders} from './settings.js';
+import {DEFAULT_HOME_TEMPLATE,renderHomeTemplate,decimalMoney,decoratedMessage} from './presentation.js';
 import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage} from './wallet.js';
 
 export async function home(db,env,uid,messageId=null) {
@@ -16,17 +17,24 @@ export async function home(db,env,uid,messageId=null) {
   rows.push([button('🎧 الدعم','support'),button('📢 الأخبار','news')]);
   if(isAdmin(env,uid)) rows.push([button('🛡️ لوحة تحكم المدير','admin','primary')]);
   if (env.RESELLER_URL?.startsWith('https://')) rows.push([urlButton('🔑 API Reseller',env.RESELLER_URL)]);
-  const [name,welcome,instructions,open]=await Promise.all([
-    getSetting(db,'store_name',env.STORE_NAME||'متجري الرقمي'),
-    getSetting(db,'welcome_text',''),getSetting(db,'storefront_instructions',''),storeAcceptsOrders(db)
+  const [name,template,instructions,count,rate]=await Promise.all([
+    getSetting(db,'store_name',env.STORE_NAME||'My Store'),
+    getSetting(db,'home_template',DEFAULT_HOME_TEMPLATE),
+    getSetting(db,'storefront_instructions',''),
+    db.prepare('SELECT COUNT(*) AS n FROM users').first(),
+    usdRate(db)
   ]);
-  const text=`🌟 ${short(welcome||`مرحباً بك في ${name}`,1500)}
-
-👤 ${short(user?.first_name||'صديقنا',100)}
-اختر الخدمة المطلوبة من القائمة أدناه.${instructions?'\n\n'+short(instructions,1500):''}
-
-${open?'💎 شراء الخدمات الرقمية يتم عبر Telegram Stars بعد موافقة المدير.':'⏸️ استقبال الطلبات الجديدة متوقف مؤقتاً.'}`;
-  return sendOrEditText(env,uid,text,keyboard(...rows),messageId);
+  const balance=Number(user?.wallet_balance_iqd||0);
+  const values={
+    store:short(name,80),name:short(user?.first_name||'مستخدم',120),
+    id:String(uid),users:Number(count?.n||0).toLocaleString('en-US'),
+    balance_iqd:decimalMoney(balance),
+    balance_usd:rate?decimalMoney(balance/rate):'غير محدد',
+    instructions:short(instructions,1200)
+  };
+  const text=renderHomeTemplate(template,values);
+  const decorated=await decoratedMessage(db,'home',text);
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
 }
 export async function categories(db,env,uid,messageId=null) {
   const cats=await listCategories(db);
@@ -34,7 +42,8 @@ export async function categories(db,env,uid,messageId=null) {
   for(let i=0;i<cats.length;i+=3) rows.push(cats.slice(i,i+3).map(c=>button(`${c.emoji} ${short(c.title,16)}`,`category:${c.id}:0`,'primary')));
   rows.push([button('🔎 البحث','search','primary'),button('🛍️ جميع المنتجات','products:0','success')]);
   rows.push(backRow());
-  return sendOrEditText(env,uid,'🛍️ أقسام المتجر\n\nاختر القسم الذي تريده:',keyboard(...rows),messageId);
+  const decorated=await decoratedMessage(db,'shop','🛍️ أقسام المتجر\n\nاختر القسم الذي تريده:');
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
 }
 export async function products(db,env,uid,page=0,categoryId=null,query=null,featuredOnly=false,messageId=null) {
   let records;
@@ -90,11 +99,13 @@ export async function profile(db,env,uid,messageId=null){
     walletSummary(db,uid)
   ]);
   const role=isAdmin(env,uid)?'◀المسؤول▶':short(u?.first_name||'العميل',60);
-  return sendOrEditText(env,uid,`👤 الملف الشخصي — ${role}\n\n🪪 المعرّف — ${uid}\n💳 الرصيد — ${w.shown}\n👥 الإحالات — ${referrals?.n||0}\n🛒 المنتجات المشتراة — ${count?.n||0}`,keyboard(
+  const profileText=`👤 الملف الشخصي — ${role}\n\n🪪 المعرّف — ${uid}\n💳 الرصيد — ${w.shown}\n👥 الإحالات — ${referrals?.n||0}\n🛒 المنتجات المشتراة — ${count?.n||0}`;
+  const decorated=await decoratedMessage(db,'profile',profileText);
+  return sendOrEditText(env,uid,decorated.text,keyboard(
     [button('💳 شحن الرصيد','topup','success')],
     [button('📦 طلباتي','orders','primary')],
     [button('📑 سجل العمليات','transactions','primary')],
-    [button('💗 المفضلة','favorites','primary')],backRow()),messageId);
+    [button('💗 المفضلة','favorites','primary')],backRow()),messageId,decorated.options);
 }
 export async function wallet(db,env,uid,messageId=null){
   const w=await walletSummary(db,uid);
@@ -102,7 +113,9 @@ export async function wallet(db,env,uid,messageId=null){
   const rows=[[button('💳 شحن المحفظة','topup',enabled?'success':'primary')],
     [button('🗂️ طلبات الشحن','orders','primary'),button('📜 سجل المحفظة','transactions','primary')],
     [button('🌐 تغيير العملة','currency','primary')],backRow()];
-  return sendOrEditText(env,uid,`💳 محفظتي\n\n💰 رصيدك: ${w.shown}\n🏷️ عملة العرض: ${w.currency}\n${w.rate?'💱 السعر المعتمد: 1 USD = '+formatIQD(w.rate):'⚠️ يحتاج عرض الدولار إلى تحديد سعر الصرف من المدير.'}\n\n${enabled?'✅ يمكنك إرسال طلب شحن لمراجعته من الإدارة.':'⏳ شحن المحفظة لم يُفعّل من الإدارة بعد.'}\n\n🔒 لا يُضاف أي رصيد حتى يؤكد المدير وصول التحويل.`,keyboard(...rows),messageId);
+  const walletText=`💳 محفظتي\n\n💰 رصيدك: ${w.shown}\n🏷️ عملة العرض: ${w.currency}\n${w.rate?'💱 السعر المعتمد: 1 USD = '+formatIQD(w.rate):'⚠️ يحتاج عرض الدولار إلى تحديد سعر الصرف من المدير.'}\n\n${enabled?'✅ يمكنك إرسال طلب شحن لمراجعته من الإدارة.':'⏳ شحن المحفظة لم يُفعّل من الإدارة بعد.'}\n\n🔒 لا يُضاف أي رصيد حتى يؤكد المدير وصول التحويل.`;
+  const decorated=await decoratedMessage(db,'wallet',walletText);
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
 }
 export async function transactions(db,env,uid,messageId=null){
   const entries=await ledger(db,uid);
@@ -117,8 +130,11 @@ export async function orders(db,env,uid,messageId=null){
   const topups=(await db.prepare('SELECT id,method,amount_iqd,requested_currency,requested_amount_minor,status,created_at FROM topup_requests WHERE user_tg_id=? ORDER BY id DESC LIMIT 10').bind(uid).all()).results??[];
   const topupText=topups.length?topups.map(t=>`#${t.id} • ${formatQuote({currency:t.requested_currency,requestedMinor:t.requested_amount_minor,amountIqd:t.amount_iqd})} • ${topupStatus(t.status)}`).join('\n'):'لا توجد طلبات شحن.';
   rows.push(...topups.slice(0,8).map(t=>[button(`💳 متابعة شحن #${t.id}`,`topup_status:${t.id}`,'primary')]));
+  rows.push([button('📨 رسائلي — ردود الدعم','my_support_inbox','primary')]);
   rows.push(backRow());
-  return sendOrEditText(env,uid,`📦 طلباتي\n\n🛍️ مشترياتك\n${txt}\n\n💳 طلبات شحن المحفظة\n${topupText}`,keyboard(...rows),messageId);
+  const ordersText=`📦 طلباتي\n\n🛍️ مشترياتك\n${txt}\n\n💳 طلبات شحن المحفظة\n${topupText}`;
+  const decorated=await decoratedMessage(db,'orders',ordersText);
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
 }
 export async function favorites(db,env,uid,messageId=null){
   const items=(await db.prepare('SELECT p.id,p.title,p.price_stars FROM favorites f JOIN products p ON p.id=f.product_id WHERE f.user_tg_id=? AND p.active=1 ORDER BY p.id DESC LIMIT 20').bind(uid).all()).results??[];

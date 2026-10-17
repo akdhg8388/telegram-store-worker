@@ -3,13 +3,15 @@ import {sendText,sendOrEditText} from './telegram.js';
 import {setSession,clearSession,audit,getUser} from './database.js';
 import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './settings.js';
 import {usdRate,receiverFor} from './wallet.js';
+import {DEFAULT_HOME_TEMPLATE} from './presentation.js';
+import {home as customerHomePreview} from './ui.js';
 import {restrictionLabel} from './moderation.js';
 
 const adminBack=[button('🛡️ لوحة المدير','admin')];
 const backTo=(destination)=>[button('⬅️ رجوع',destination)];
 
 export function adminRoute(data){
-  return /^(?:admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_visuals|admin_visual_preview|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function stats(db,env,uid,messageId=null){
@@ -41,11 +43,11 @@ async function settings(db,env,uid,page=0,messageId=null){
 async function settingDetail(db,env,uid,key,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
   const def=SETTING_FIELDS[key];if(!def)return reply('الإعداد غير معروف.');
-  const fallback=key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':key==='manual_topups_enabled'?env.ENABLE_MANUAL_TOPUPS||'false':'';
+  const fallback=key==='home_template'?DEFAULT_HOME_TEMPLATE:key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':key==='manual_topups_enabled'?env.ENABLE_MANUAL_TOPUPS||'false':'';
   const value=await getSetting(db,key,fallback||'');
   const rows=def.toggle?[[button(value==='false'?(key==='manual_topups_enabled'?'✅ تشغيل الشحن':'✅ تشغيل استقبال الطلبات'):(key==='manual_topups_enabled'?'⏸️ إيقاف الشحن':'⏸️ إيقاف الطلبات الجديدة'),key==='manual_topups_enabled'?'admin_toggle_topups':'admin_toggle_store',value==='false'?'success':'danger')]]:[[button('✏️ تعديل','admin_setting_edit:'+key)]];
   rows.push(backTo('admin_settings:0'),adminBack);
-  return reply(`${def.label}\n\nالقيمة الحالية:\n${short(value||'لم يتم التحديد بعد',1750)}\n\n${def.toggle?(key==='manual_topups_enabled'?'يمكن تعطيل الشحن دون إلغاء طلبات الشحن التي سبق إرسالها.':'الإيقاف يمنع إنشاء طلبات شراء جديدة ولا يلغي الطلبات السابقة.'):'اكتب نصاً جديداً عند الضغط على تعديل، أو كلمة /empty لمسح الحقول الاختيارية.'}`,keyboard(...rows));
+  return reply(`${def.label}\n\nالقيمة الحالية:\n${short(value||'لم يتم التحديد بعد',1750)}\n\n${def.toggle?(key==='manual_topups_enabled'?'يمكن تعطيل الشحن دون إلغاء طلبات الشحن التي سبق إرسالها.':'الإيقاف يمنع إنشاء طلبات شراء جديدة ولا يلغي الطلبات السابقة.'):key==='home_template'?'الحقول الحقيقية المتاحة: {store} {balance_iqd} {balance_usd} {name} {id} {users} {instructions}. لا تغير هذه الحقول لتبقى القيم مباشرة من D1.':def.customEmoji?'يمكنك لصق رقم custom_emoji_id أو إرسال رمز متحرك ليتعرف البوت على معرّفه. اكتب /empty للإزالة.':'اكتب نصاً جديداً عند الضغط على تعديل، أو كلمة /empty لمسح الحقول الاختيارية.'}`,keyboard(...rows));
 }
 
 async function products(db,env,uid,page=0,messageId=null){
@@ -163,7 +165,21 @@ async function topupSetup(db,env,uid,messageId=null){
 export async function handleAdminCallback(db,env,uid,data,messageId=null){
   if(!adminRoute(data) && !data.startsWith('admin_setting_edit:'))return false;
   if(!isAdmin(env,uid)){await sendText(env,uid,'⛔ هذا الإجراء غير متاح.');return true;}
-  if(data==='admin_topup_setup')await topupSetup(db,env,uid,messageId);
+  if(data==='admin_visuals')await sendOrEditText(env,uid,`🎨 تخصيص واجهة المتجر
+
+يمكن تعديل رسالة الترحيب والرموز المتحركة للصفحات دون تغيير الأرصدة أو الهويات الحقيقية.
+
+حقول القالب: {store} {name} {id} {users} {balance_iqd} {balance_usd} {instructions}
+
+أرسل رقم custom_emoji_id أو رسالة تحتوي على إيموجي متحرك عند اختيار حقل الرمز. يلزم دعم Telegram لتظهر الحركة.`,keyboard(
+    [button('👋 تعديل رسالة الترحيب','admin_setting:home_template','primary')],
+    [button('👁️ معاينة الرئيسية بالبيانات الحقيقية','admin_visual_preview','success')],
+    [button('✨ رمز الرئيسية','admin_setting:home_custom_emoji_id','primary'),button('✨ رمز المتجر','admin_setting:shop_custom_emoji_id','primary')],
+    [button('✨ رمز الملف','admin_setting:profile_custom_emoji_id','primary'),button('✨ رمز المحفظة','admin_setting:wallet_custom_emoji_id','primary')],
+    [button('✨ رمز الطلبات','admin_setting:orders_custom_emoji_id','primary'),button('✨ رمز الدعم','admin_setting:support_custom_emoji_id','primary')],
+    [button('🛡️ لوحة المدير','admin','primary')]),messageId);
+  else if(data==='admin_visual_preview')await customerHomePreview(db,env,uid,messageId);
+  else if(data==='admin_topup_setup')await topupSetup(db,env,uid,messageId);
   else if(data==='admin_rate_1520'){
     // Old callbacks must never overwrite an explicit owner rate.
     if(await usdRate(db)){
@@ -267,13 +283,15 @@ export async function handleAdminText(db,env,uid,session,message){
   const text=String(message.text??'').trim();
   if(session.action==='owner_setting'){
     const {key}=session.payload||{};
-    const valid=validateSetting(key,text==='/empty'?'':text);
+    const receivedCustom=(message.entities||message.caption_entities||[]).find(e=>e.type==='custom_emoji'&&e.custom_emoji_id)?.custom_emoji_id;
+    const raw=SETTING_FIELDS[key]?.customEmoji && receivedCustom ? String(receivedCustom) : text;
+    const valid=validateSetting(key,raw==='/empty'?'':raw);
     if(!valid.ok){await sendText(env,uid,'❌ '+valid.reason);return true;}
     await updateSetting(db,key,valid.value,uid);
     await audit(db,uid,'edit_'+key,'setting',0);
     await clearSession(db,uid);
     await sendText(env,uid,`✅ تم حفظ الإعداد: ${SETTING_FIELDS[key].label}`,keyboard(
-      [button('⚙️ إعداد الشحن','admin_topup_setup','primary')],
+      [button('🎨 تخصيص الواجهة','admin_visuals','primary')],
       [button('⚙️ جميع الإعدادات','admin_settings:0','primary')],adminBack));
     return true;
   }

@@ -10,7 +10,7 @@ import {baghdadDate,topupStatusMessage} from '../src/wallet.js';
 const env={ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'FAKE_BOT',ENABLE_MANUAL_TOPUPS:'true'};
 function fixture(){
   const conn=new DatabaseSync(':memory:');
-  for(const name of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql'])
+  for(const name of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql'])
     conn.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
   conn.prepare("INSERT INTO users(tg_id,first_name,username) VALUES (101,'Customer','customer'),(102,'Other','other'),(991,'Owner','owner')").run();
   conn.prepare("INSERT INTO bot_settings(key,value) VALUES ('usd_rate_iqd','1520'),('superqi_receiver','TEST receiver'),('manual_topups_enabled','true')").run();

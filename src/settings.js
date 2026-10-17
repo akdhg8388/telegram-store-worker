@@ -1,7 +1,14 @@
 // The only values that an administrator may edit from Telegram. Secrets and identity are immutable here.
 export const SETTING_FIELDS=Object.freeze({
   store_name: {label:'🏪 اسم المتجر',max:80,required:true},
-  welcome_text: {label:'👋 رسالة الترحيب',max:1500},
+  home_template: {label:'👋 قالب رسالة الرئيسية (حقول حقيقية)',max:3200},
+  welcome_text: {label:'👋 نص الترحيب السابق (للتوافق)',max:1500},
+  home_custom_emoji_id: {label:'✨ الرمز المتحرك للرئيسية',max:30,customEmoji:true},
+  shop_custom_emoji_id: {label:'✨ الرمز المتحرك للمتجر',max:30,customEmoji:true},
+  profile_custom_emoji_id: {label:'✨ الرمز المتحرك للملف الشخصي',max:30,customEmoji:true},
+  wallet_custom_emoji_id: {label:'✨ الرمز المتحرك للمحفظة',max:30,customEmoji:true},
+  orders_custom_emoji_id: {label:'✨ الرمز المتحرك للطلبات',max:30,customEmoji:true},
+  support_custom_emoji_id: {label:'✨ الرمز المتحرك للدعم',max:30,customEmoji:true},
   storefront_instructions: {label:'🛍️ تعليمات المتجر',max:1500},
   purchase_instructions: {label:'🛒 تعليمات الطلب',max:1500},
   topup_instructions: {label:'💳 تعليمات الشحن',max:1500},
@@ -26,6 +33,7 @@ export function validateSetting(key,input){
   const field=SETTING_FIELDS[key];
   if(!field)return {ok:false,reason:'الإعداد غير مدعوم.'};
   const value=String(input??'').trim();
+  if(field.customEmoji && value && !/^\d{10,30}$/.test(value))return {ok:false,reason:'أرسل custom_emoji_id الصحيح أو أرسل رسالة تتضمن الرمز المتحرك، أو /empty للمسح.'};
   if(field.rate && (!/^\d+$/.test(value) || Number(value)<100 || Number(value)>10000))return {ok:false,reason:'أدخل سعراً صحيحاً بين 100 و10,000 دينار لكل دولار واحد.'};
   if(field.toggle && !['true','false'].includes(value))return {ok:false,reason:'اختر تفعيل أو تعطيل من لوحة الإدارة.'};
   if(field.required && !value)return {ok:false,reason:'لا يمكن ترك هذا الحقل فارغاً.'};

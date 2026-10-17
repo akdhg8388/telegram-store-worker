@@ -2,6 +2,7 @@ import {button,keyboard,short,isAdmin,positiveInt} from './common.js';
 import {sendText,sendOrEditText,telegram,queueNotification,flushOutbox} from './telegram.js';
 import {setSession,clearSession,getUser,audit} from './database.js';
 import {baghdadDate} from './wallet.js';
+import {decoratedMessage} from './presentation.js';
 
 const back=()=>[button('↩️ رجوع إلى الرسائل','support_inbox','danger')];
 const adminBack=()=>[button('🛡️ لوحة الإدارة','admin','primary')];
@@ -42,7 +43,8 @@ export async function inbox(db,env,uid,messageId=null){
     GROUP BY m.user_tg_id ORDER BY latest DESC LIMIT 25`).all()).results??[];
   const rows=threads.map(t=>[button(`${t.unread?'🔴 '+t.unread+' • ':'💬 '}${short(t.first_name||t.username||String(t.user_tg_id),25)} • ${t.user_tg_id}`,`support_thread:${t.user_tg_id}`,'primary')]);
   rows.push([button('🔄 تحديث','support_inbox','primary')],adminBack());
-  return sendOrEditText(env,uid,`📨 صندوق الدعم الفني\n\n${threads.length?'اختر مستخدماً لعرض المحادثة والرد على رسائله.':'لا توجد رسائل دعم بعد.'}`,keyboard(...rows),messageId);
+  const decorated=await decoratedMessage(db,'support',`📨 صندوق الدعم الفني\n\n${threads.length?'اختر مستخدماً لعرض المحادثة والرد على رسائله.':'لا توجد رسائل دعم بعد.'}`);
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
 }
 export async function thread(db,env,uid,target,messageId=null){
   const u=await getUser(db,target);
@@ -143,5 +145,58 @@ export async function handleSupportReply(db,env,uid,session,message){
     .bind(target,content.kind,content.body,content.fileId,sent.message_id||null,message.message_id||null).run();
   await clearSession(db,uid);
   await sendText(env,uid,`✅ وصل رد الدعم للمستخدم ${target}.`,keyboard([button('💬 فتح المحادثة',`support_thread:${target}`,'primary')],back()));
+  return true;
+}
+
+// Customer view. Every query uses the authenticated Telegram user ID; a user
+// can never request or enumerate a different customer's support conversation.
+export async function customerInbox(db,env,uid,messageId=null){
+  const count=await db.prepare('SELECT COUNT(*) n FROM support_messages WHERE user_tg_id=?').bind(uid).first();
+  const latest=await db.prepare('SELECT kind,direction,created_at FROM support_messages WHERE user_tg_id=? ORDER BY id DESC LIMIT 1').bind(uid).first();
+  const decorated=await decoratedMessage(db,'support',`📨 رسائلي — الدعم الفني\n\n📩 الرسائل المحفوظة: ${count?.n||0}${latest?'\n🕓 آخر تواصل: '+baghdadDate(latest.created_at):''}\n\nيمكنك مراجعة رسائلك وردود الإدارة والصور والفيديوهات وتاريخ كل رسالة.`);
+  return sendOrEditText(env,uid,decorated.text,keyboard(
+    [button('💬 فتح سجل المحادثة','my_support_thread:0','primary')],
+    [button('✉️ رسالة جديدة للدعم','my_support_new','success')],
+    [button('📦 رجوع إلى طلباتي','orders','danger')]),messageId,decorated.options);
+}
+export async function customerThread(db,env,uid,page=0,messageId=null){
+  const offset=Math.max(0,Math.min(page,200))*8;
+  const messages=(await db.prepare('SELECT * FROM support_messages WHERE user_tg_id=? ORDER BY id DESC LIMIT 9 OFFSET ?').bind(uid,offset).all()).results??[];
+  const segment=messages.slice(0,8);
+  // Reverse just this page to read top-to-bottom chronologically.
+  const text=segment.slice().reverse().map(m=>`${m.direction==='incoming'?'👤 أنت':'🎧 فريق الدعم'} • ${baghdadDate(m.created_at)}\n${preview(m)}`).join('\n\n');
+  const rows=segment.filter(m=>m.kind!=='text').map(m=>[button(`${m.kind==='photo'?'📷':'🎬'} فتح المرفق #${m.id}`,`my_support_media:${m.id}`,'primary')]);
+  const nav=[];
+  if(page>0)nav.push(button('⬅️ أحدث',`my_support_thread:${page-1}`,'primary'));
+  if(messages.length>8)nav.push(button('أقدم ➡️',`my_support_thread:${page+1}`,'primary'));
+  if(nav.length)rows.push(nav);
+  rows.push([button('✉️ رد أو رسالة جديدة','my_support_new','success')]);
+  rows.push([button('↩️ رجوع لرسائلي','my_support_inbox','danger')]);
+  return sendOrEditText(env,uid,`📨 سجل رسائلي • صفحة ${page+1}\n\n${text||'لا توجد مراسلات بعد.'}`,keyboard(...rows),messageId);
+}
+export async function handleCustomerSupportCallback(db,env,uid,data,messageId=null){
+  if(!/^(?:my_support_inbox|my_support_new|my_support_thread:\d+|my_support_media:\d+)$/.test(data))return false;
+  if(data==='my_support_inbox'){await customerInbox(db,env,uid,messageId);return true;}
+  if(data==='my_support_new'){
+    await setSession(db,uid,'support');
+    await sendText(env,uid,'✉️ أرسل نصاً أو صورة أو فيديو الآن. سيُحفظ تواصلك في «طلباتي ← رسائلي».',keyboard([button('📨 رسائلي','my_support_inbox','primary')],[button('🏠 الرئيسية','home','danger')]));
+    return true;
+  }
+  if(data.startsWith('my_support_thread:')){
+    const page=Number(data.split(':')[1]);
+    await customerThread(db,env,uid,Math.min(page,200),messageId);
+    return true;
+  }
+  if(data.startsWith('my_support_media:')){
+    const id=positiveInt(data.split(':')[1]);
+    const m=id?await db.prepare('SELECT kind,telegram_file_id,created_at FROM support_messages WHERE id=? AND user_tg_id=?').bind(id,uid).first():null;
+    if(!m?.telegram_file_id){await sendText(env,uid,'هذا المرفق غير متوفر ضمن رسائلك.');return true;}
+    const method=m.kind==='photo'?'sendPhoto':m.kind==='video'?'sendVideo':null;
+    if(method){
+      try{await telegram(env,method,{chat_id:uid,[m.kind]:m.telegram_file_id,caption:'📎 مرفق من سجل الدعم • '+baghdadDate(m.created_at)});}
+      catch{await sendText(env,uid,'تعذر عرض المرفق الآن. يمكنك التواصل مع الدعم لاسترجاعه.');}
+    }
+    return true;
+  }
   return true;
 }
