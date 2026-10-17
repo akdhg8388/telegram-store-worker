@@ -2,7 +2,7 @@ import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMeth
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
 import {sendOrEditText} from './telegram.js';
 import {getSetting,storeAcceptsOrders} from './settings.js';
-import {DEFAULT_HOME_TEMPLATE,renderHomeTemplate,decimalMoney,decoratedMessage} from './presentation.js';
+import {DEFAULT_HOME_TEMPLATE,renderHomeTemplate,decimalMoney,decoratedMessage,decoratedHome} from './presentation.js';
 import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage} from './wallet.js';
 
 export async function home(db,env,uid,messageId=null) {
@@ -28,12 +28,13 @@ export async function home(db,env,uid,messageId=null) {
   const values={
     store:short(name,80),name:short(user?.first_name||'مستخدم',120),
     id:String(uid),users:Number(count?.n||0).toLocaleString('en-US'),
+    balance:user?.currency_preference==='USD' ? (rate?'$'+decimalMoney(balance/rate):'$—') : 'IQD '+Number(balance).toLocaleString('en-US'),
     balance_iqd:decimalMoney(balance),
     balance_usd:rate?decimalMoney(balance/rate):'غير محدد',
     instructions:short(instructions,1200)
   };
   const text=renderHomeTemplate(template,values);
-  const decorated=await decoratedMessage(db,'home',text);
+  const decorated=await decoratedHome(db,text);
   return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
 }
 export async function categories(db,env,uid,messageId=null) {

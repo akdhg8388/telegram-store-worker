@@ -45,8 +45,10 @@ test('V9 home uses real store, wallet, exchange rate, Telegram identity, user co
    await home(db,environment,101);
    const [sent]=calls;
    assert.match(sent.body.text,/👋 أهلاً بك في My Store!/);
-   assert.match(sent.body.text,/IQD 152,000\.00/);
-   assert.match(sent.body.text,/\$100\.00 USD/);
+   assert.match(sent.body.text,/💰 رصيدك: IQD 152,000/);
+   assert.doesNotMatch(sent.body.text,/\$100\.00|USD/);
+   assert.ok(sent.body.entities.some(e=>e.type==='bold' && sent.body.text.slice(e.offset,e.offset+e.length)==='رصيدك:'));
+   assert.ok(sent.body.entities.some(e=>e.type==='bold' && sent.body.text.slice(e.offset,e.offset+e.length)==='الاسم:'));
    assert.match(sent.body.text,/👤 الاسم: مهند/);
    assert.match(sent.body.text,/🆔 المعرّف: 101/);
    assert.match(sent.body.text,/👥 المستخدمون: 3/);
@@ -65,13 +67,13 @@ test('V9 template is editable from owner panel without falsifying real placehold
    assert.equal(await handleAdminCallback(db,environment,991,'admin_setting_edit:home_template'),true);
    const session=conn.prepare('SELECT action,payload FROM user_sessions WHERE user_tg_id=991').get();
    assert.equal(session.action,'owner_setting');
-   const template='👋 {store} | 👤 {name} | 🆔 {id} | 💳 {balance_iqd} د.ع | 💵 {balance_usd} USD | 👥 {users}';
+   const template='👋 {store} | 👤 {name} | 🆔 {id} | 💳 {balance} | 👥 {users}';
    await handleAdminText(db,environment,991,{action:session.action,payload:JSON.parse(session.payload)},{text:template});
    await home(db,environment,101);
    const last=texts(calls).at(-1);
    assert.match(last,/My Store \| 👤 مهند \| 🆔 101/);
-   assert.match(last,/152,000\.00 د\.ع/);
-   assert.match(last,/100\.00 USD/);
+   assert.match(last,/IQD 152,000/);
+   assert.doesNotMatch(last,/100\.00 USD/);
    assert.match(last,/👥 3/);
  })}finally{conn.close()}
 });
@@ -110,20 +112,18 @@ test('V9 orders links to customer private inbox and shows preserved messages, im
  })}finally{conn.close()}
 });
 
-test('V9 chat cleanup only happens when Home is opened and preserves D1 business records',async()=>{
+test('V10 old-style navigation never deletes or tracks chat messages when opening Home',async()=>{
  const {conn,db}=fixture();const env={...environment,DB:db};try{await mockTelegram(async calls=>{
    const pending=[];const ctx={waitUntil(p){pending.push(p)}};
    await processUpdate(db,env,ctx,msg(101,'/orders'));
    await processUpdate(db,env,ctx,msg(101,'/wallet'));
-   assert.equal(calls.filter(c=>c.method.startsWith('delete')).length,0);
-   assert.ok(conn.prepare('SELECT COUNT(*) n FROM chat_cleanup_messages WHERE user_tg_id=101').get().n>=2);
    await processUpdate(db,env,ctx,cb(101,'home'));
-   assert.ok(calls.some(c=>c.method==='deleteMessages'));
-   assert.ok(texts(calls).at(-1).includes('أهلاً بك في My Store'));
+   await processUpdate(db,env,ctx,msg(101,'/start'));
+   assert.equal(calls.filter(c=>['deleteMessages','deleteMessage'].includes(c.method)).length,0);
+   assert.equal(conn.prepare('SELECT COUNT(*) n FROM chat_cleanup_messages').get().n,0);
+   assert.ok(calls.some(c=>c.method==='editMessageText' && c.body.message_id===900 && c.body.text.includes('أهلاً بك في My Store')));
    assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,152000);
    assert.equal(conn.prepare('SELECT COUNT(*) n FROM wallet_ledger').get().n,1);
-   const items=conn.prepare('SELECT COUNT(*) n FROM chat_cleanup_messages WHERE user_tg_id=101').get().n;
-   assert.equal(items,1); // new home remains, old temporary messages are gone
    await Promise.all(pending);
  })}finally{conn.close()}
 });
@@ -131,8 +131,10 @@ test('V9 chat cleanup only happens when Home is opened and preserves D1 business
 test('V9 missing FX rate is not fabricated and unknown placeholders are not executed',async()=>{
  const {conn,db}=fixture();try{await mockTelegram(async calls=>{
    conn.prepare("DELETE FROM bot_settings WHERE key='usd_rate_iqd'").run();
+   conn.prepare("UPDATE users SET currency_preference='USD' WHERE tg_id=101").run();
    await home(db,environment,101);
-   assert.match(texts(calls).at(-1),/\$غير محدد USD/);
+   assert.match(texts(calls).at(-1),/💰 رصيدك: \$—/);
+   assert.doesNotMatch(texts(calls).at(-1),/IQD/);
    assert.match(renderHomeTemplate('{name} {unknown} {users}',{name:'user',users:'3'}),/user \{unknown\} 3/);
  })}finally{conn.close()}
 });

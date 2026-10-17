@@ -10,18 +10,6 @@ export async function telegram(env, method, params) {
     err.retryAfter=Number.isSafeInteger(data?.parameters?.retry_after) ? data.parameters.retry_after : null;
     throw err;
   }
-  // Track bot-created private-chat messages so Home can clean temporary chat UI.
-  // Tracking is best-effort, and may never block a delivered Telegram message.
-  if (env.DB && ['sendMessage','sendPhoto','sendVideo','editMessageText'].includes(method)) {
-    const chatId=Number(params?.chat_id);
-    const messageId=Number(data.result?.message_id);
-    if(Number.isSafeInteger(chatId) && chatId>0 && Number.isSafeInteger(messageId) && messageId>0){
-      try{
-        await env.DB.prepare(`INSERT OR IGNORE INTO chat_cleanup_messages(user_tg_id,message_id,direction)
-          VALUES (?,?,'outgoing')`).bind(chatId,messageId).run();
-      }catch(e){console.error('Unable to track temporary Telegram UI message',String(e));}
-    }
-  }
   return data.result;
 }
 export async function sendText(env,chat_id,text,reply_markup,options={}) {
@@ -30,7 +18,10 @@ export async function sendText(env,chat_id,text,reply_markup,options={}) {
   try{return await telegram(env,'sendMessage',payload)}
   catch(error){
     if(payload.entities && /custom.emoji|can't parse entities|entity_bounds_invalid/i.test(String(error))) {
-      delete payload.entities;return telegram(env,'sendMessage',payload);
+      const safe=payload.entities.filter(e=>e.type!=='custom_emoji');
+      if(safe.length===payload.entities.length)throw error;
+      if(safe.length)payload.entities=safe;else delete payload.entities;
+      return telegram(env,'sendMessage',payload);
     }
     throw error;
   }
@@ -45,8 +36,11 @@ export async function sendOrEditText(env, chat_id, text, reply_markup, message_i
   }catch(error){
     const msg=String(error);
     if(/message is not modified/i.test(msg))return null;
-    if(options?.entities && /custom.emoji|can't parse entities|entity_bounds_invalid/i.test(msg))
-      return sendOrEditText(env,chat_id,text,reply_markup,message_id,{});
+    if(options?.entities && /custom.emoji|can't parse entities|entity_bounds_invalid/i.test(msg)) {
+      const safe=options.entities.filter(e=>e.type!=='custom_emoji');
+      if(safe.length===options.entities.length)throw error;
+      return sendOrEditText(env,chat_id,text,reply_markup,message_id,safe.length?{entities:safe}:{});
+    }
     if(/message to edit not found|message can't be edited|message identifier is not specified/i.test(msg))
       return sendText(env,chat_id,text,reply_markup,options);
     throw error;

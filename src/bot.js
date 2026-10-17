@@ -7,7 +7,6 @@ import {getSetting,storeAcceptsOrders} from './settings.js';
 import {USD_PRESETS,formatQuote,usdRate,isTopupEnabled,receiverFor,quoteMinor,quoteFromUSD,parseCustomMinor,topupStatusMessage,baghdadDate} from './wallet.js';
 import {amountInIQD,topupDecisionText,guardUser} from './moderation.js';
 import {submitSupport,handleSupportCallback,handleSupportReply,handleCustomerSupportCallback} from './support.js';
-import {trackChatMessage,cleanChatOnHome} from './cleanup.js';
 import {handleUserCallback,handleUserText} from './admin-users.js';
 
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}) {
@@ -123,7 +122,6 @@ async function handleMessage(db,env,ctx,message){
   const uid=message.from?.id;
   if(!uid || !message.chat || message.chat.type!=='private') return;
   await ensureUser(db,message.from);
-  if(Number.isSafeInteger(message.message_id))await trackChatMessage(db,uid,message.message_id);
   const denied=await guardUser(db,env,uid);
   if(denied)return sendText(env,uid,denied);
   const text=String(message.text??'').trim();
@@ -133,12 +131,11 @@ async function handleMessage(db,env,ctx,message){
     if(ref && ref!==String(uid)) {
       await db.prepare('INSERT OR IGNORE INTO referrals(user_tg_id,referrer_tg_id) SELECT ?,tg_id FROM users WHERE tg_id=?').bind(uid,ref).run();
     }
-    await cleanChatOnHome(db,env,uid);
     return ui.home(db,env,uid);
   }
   // Telegram's hamburger menu sends slash commands, not ReplyKeyboard text.
   // Clear text-entry sessions before top-level navigation, to avoid stale forms.
-  if(text==='/menu'){await clearSession(db,uid);await cleanChatOnHome(db,env,uid);return ui.home(db,env,uid)}
+  if(text==='/menu'){await clearSession(db,uid);return ui.home(db,env,uid)}
   if(text==='/shop'){await clearSession(db,uid);return ui.categories(db,env,uid)}
   if(text==='/profile'){await clearSession(db,uid);return ui.profile(db,env,uid)}
   if(text==='/history'||text==='/transactions'){await clearSession(db,uid);return ui.transactions(db,env,uid)}
@@ -343,12 +340,11 @@ async function handleCallback(db,env,ctx,q){
   const denied=await guardUser(db,env,uid);
   if(denied)return sendText(env,uid,denied);
   const data=String(q.data||'');
-  if(q.message?.message_id)await trackChatMessage(db,uid,q.message.message_id,'outgoing');
   if(await handleCustomerSupportCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleSupportCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleUserCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleAdminCallback(db,env,uid,data,q.message?.message_id))return;
-  if(data==='home'){await clearSession(db,uid);await cleanChatOnHome(db,env,uid);return ui.home(db,env,uid)}
+  if(data==='home'){await clearSession(db,uid);return ui.home(db,env,uid,q.message?.message_id)}
   if(data==='categories')return ui.categories(db,env,uid,q.message?.message_id);
   if(data==='featured')return ui.products(db,env,uid,0,null,null,true,q.message?.message_id);
   if(data==='profile')return ui.profile(db,env,uid,q.message?.message_id);
