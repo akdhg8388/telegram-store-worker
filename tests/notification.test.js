@@ -7,7 +7,7 @@ import {flushOutbox,queueNotification} from '../src/telegram.js';
 
 function setup(){
   const conn=new DatabaseSync(':memory:');
-  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql'])
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql'])
     conn.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   const db={
     prepare(sql){
@@ -99,11 +99,11 @@ test('disabled manual wallet topup cannot be bypassed with stale inline buttons 
  try {
    const ctx={waitUntil() {}};
    await processUpdate(db,{ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'TEST_TOKEN',ENABLE_MANUAL_TOPUPS:'false'},ctx,
-     {update_id:9001,callback_query:{id:'cb1',from:{id:101,first_name:'Shopper'},message:{message_id:7,chat:{type:'private',id:101}},data:'topup_amount:asiacell:10000'}});
+     {update_id:9001,callback_query:{id:'cb1',from:{id:101,first_name:'Shopper'},message:{message_id:7,chat:{type:'private',id:101}},data:'topup_preset:10'}});
    await processUpdate(db,{ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'TEST_TOKEN',ENABLE_MANUAL_TOPUPS:'false'},ctx,
      {update_id:9002,message:{from:{id:101,first_name:'Shopper'},chat:{type:'private',id:101},text:'reference999'}});
    assert.equal(conn.prepare('SELECT COUNT(*) n FROM topup_requests').get().n,0);
    assert.equal(conn.prepare('SELECT COUNT(*) n FROM user_sessions').get().n,0);
-   assert.ok(seen.some(x=>x.body.text?.includes('الشحن اليدوي')));
+   assert.ok(seen.some(x=>x.body.text?.includes('الشحن')));
  } finally {globalThis.fetch=previous;conn.close();}
 });

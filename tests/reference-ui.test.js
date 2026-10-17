@@ -7,7 +7,7 @@ import {backRow} from '../src/common.js';
 
 function createTestDb(){
   const conn=new DatabaseSync(':memory:');
-  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql'])
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql'])
     conn.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   conn.prepare("INSERT INTO users(tg_id,first_name) VALUES (101,'Owner')").run();
   const db={prepare(sql){const stmt=conn.prepare(sql);let values=[];
@@ -46,13 +46,14 @@ test('new reference catalog organizes categories into three-column rows and pres
  }finally{conn.close()}
 });
 
-test('wallet does not expose a dead-end recharge button when recharge disabled',async()=>{
+test('wallet displays disabled status while retaining the visible topup entry',async()=>{
  const {conn,db}=createTestDb();
  try{
   await withMockTelegram(async(sent)=>{
     await wallet(db,{TELEGRAM_BOT_TOKEN:'TEST',ENABLE_MANUAL_TOPUPS:'false'},101);
     const controls=sent[0].payload.reply_markup.inline_keyboard.flat();
-    assert.ok(!controls.some(b=>b.callback_data==='topup'));
+    assert.ok(controls.some(b=>b.callback_data==='topup'));
+    assert.ok(sent[0].payload.text.includes('لم يُفعّل'));
     assert.ok(controls.some(b=>b.callback_data==='transactions'));
   });
   await withMockTelegram(async(sent)=>{

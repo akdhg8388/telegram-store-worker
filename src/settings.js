@@ -15,6 +15,10 @@ export const SETTING_FIELDS=Object.freeze({
   asiacell_receiver: {label:'📱 بيانات استقبال آسيا سيل',max:250},
   zaincash_receiver: {label:'💸 بيانات استقبال زين كاش',max:250},
   superqi_receiver: {label:'🏦 بيانات استقبال سوبر كي',max:250},
+  zain_balance_receiver: {label:'📱 رقم استقبال رصيد زين',max:250},
+  binance_receiver: {label:'🟡 Binance Pay ID أو العنوان والشبكة',max:350},
+  usd_rate_iqd: {label:'💱 سعر الدولار بالدينار العراقي (لكل 1 USD)',max:5,required:true,rate:true},
+  manual_topups_enabled: {label:'💳 تشغيل طلبات شحن المحفظة',max:5,toggle:true},
   store_enabled: {label:'🔌 استقبال طلبات جديدة',max:5,toggle:true},
 });
 
@@ -22,6 +26,7 @@ export function validateSetting(key,input){
   const field=SETTING_FIELDS[key];
   if(!field)return {ok:false,reason:'الإعداد غير مدعوم.'};
   const value=String(input??'').trim();
+  if(field.rate && (!/^\d+$/.test(value) || Number(value)<100 || Number(value)>10000))return {ok:false,reason:'أدخل سعراً صحيحاً بين 100 و10,000 دينار لكل دولار واحد.'};
   if(field.toggle && !['true','false'].includes(value))return {ok:false,reason:'اختر تفعيل أو تعطيل من لوحة الإدارة.'};
   if(field.required && !value)return {ok:false,reason:'لا يمكن ترك هذا الحقل فارغاً.'};
   if(value.length>field.max)return {ok:false,reason:`الحد الأقصى ${field.max} حرف.`};

@@ -6,7 +6,7 @@ export const button = (text, callback_data, style) => ({ text, callback_data, ..
 export const urlButton = (text, url) => ({ text, url });
 export const keyboard = (...rows) => ({ inline_keyboard: rows.filter(x => x?.length) });
 export const backRow = () => [button('↩️ الرجوع للرئيسية', 'home', 'danger')];
-export const moneyMethods = { asiacell: 'آسيا سيل', zaincash: 'زين كاش', superqi: 'سوبر كي' };
+export const moneyMethods = { asiacell: 'آسيا سيل', zaincash: 'زين كاش', zain_balance: 'رصيد زين', superqi: 'سوبر كي', binance: 'Binance' };
 export const orderNames = {
   awaiting_admin: '⏳ بانتظار موافقة المدير',
   awaiting_payment: '💳 بانتظار الدفع بالنجوم',

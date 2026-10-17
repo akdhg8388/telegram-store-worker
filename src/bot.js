@@ -4,6 +4,7 @@ import {ensureUser,getUser,setSession,getSession,clearSession,getProduct,audit} 
 import * as ui from './ui.js';
 import {handleAdminCallback,handleAdminText} from './admin-controls.js';
 import {getSetting,storeAcceptsOrders} from './settings.js';
+import {USD_PRESETS,formatQuote,usdRate,isTopupEnabled,receiverFor,quoteMinor,quoteFromUSD,parseCustomMinor,topupStatusMessage,baghdadDate} from './wallet.js';
 
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null) {
   for(const admin of adminIds(env)) {
@@ -14,47 +15,62 @@ async function notifyAdmins(db,env,text,photoFileId=null,markup=null) {
 async function notifyUser(db,uid,text,markup=null) {
   await queueNotification(db,'sendMessage',{chat_id:uid,text:short(text,3900),...(markup?{reply_markup:markup}:{})});
 }
-async function writeTopup(db,env,ctx,uid,session,photoFileId=null,photoUniqueId=null) {
-  if(env.ENABLE_MANUAL_TOPUPS!=='true') return sendText(env,uid,'⛔ طلبات الشحن اليدوي غير مفعلة حالياً.');
-  const {method,amount,reference=null} = session.payload;
-  if(!reference && !photoFileId) return sendText(env,uid,'أرسل رقم التحويل أو صورة إثبات الشحن. لا يمكن إرسال طلب فارغ.');
+async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
+  if(!await isTopupEnabled(db,env))return sendText(env,uid,'⛔ تم إيقاف استقبال طلبات الشحن مؤقتاً.');
+  const p=session.payload;
+  if(!['zain_balance','superqi','binance'].includes(p.method) || !p.amountIqd || !p.currency || !p.requestedMinor || !/^[0-9a-f-]{36}$/i.test(p.nonce||'') ||
+     (!p.reference && !p.proofFileId))return sendText(env,uid,'⚠️ الطلب غير مكتمل؛ أعد إنشاء طلب الشحن.');
+  if(!await receiverFor(db,env,p.method))return sendText(env,uid,'⛔ أوقفت الإدارة وسيلة الشحن هذه. اختر وسيلة أخرى.');
+  const source=Number.isSafeInteger(sourceMessageId)&&sourceMessageId>0?sourceMessageId:null;
   let result;
   try {
-    result=await db.prepare(`INSERT INTO topup_requests(user_tg_id,method,amount_iqd,transfer_reference,proof_file_id,proof_unique_id)
-      VALUES (?,?,?,?,?,?)`).bind(uid,method,amount,reference||null,photoFileId,photoUniqueId).run();
-  } catch(err) {
-    if(/UNIQUE|constraint/i.test(String(err))) return sendText(env,uid,'❌ هذا الرقم أو الإثبات مستخدم في طلب سابق. تأكد من بياناتك أو تواصل مع الدعم.');
+    result=await db.prepare(`INSERT INTO topup_requests
+      (user_tg_id,method,amount_iqd,transfer_reference,proof_file_id,proof_unique_id,requested_currency,requested_amount_minor,quoted_rate_iqd,source_message_id,submission_key)
+      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE
+      (SELECT COUNT(*) FROM topup_requests WHERE user_tg_id=? AND status='pending') < 3`)
+      .bind(uid,p.method,p.amountIqd,p.reference||null,p.proofFileId||null,p.proofUniqueId||null,p.currency,p.requestedMinor,p.rate,source,p.nonce,uid).run();
+  }catch(err){
+    if(/UNIQUE|constraint/i.test(String(err))){
+      {
+        const previous=await db.prepare('SELECT id FROM topup_requests WHERE user_tg_id=? AND (source_message_id=? OR submission_key=?)').bind(uid,source,p.nonce).first();
+        if(previous)return sendText(env,uid,`✅ تم تسجيل هذا الطلب سابقاً برقم #${previous.id}.`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
+      }
+      return sendText(env,uid,'❌ تم تسجيل رقم التحويل أو صورة الإثبات مسبقاً. لا يمكن استعمال الإثبات مرتين.');
+    }
     throw err;
   }
-  const id=result.meta?.last_row_id;
+  if(!result.meta?.changes)return sendText(env,uid,'⏳ لديك 3 طلبات شحن معلقة. يرجى انتظار قرار المدير قبل إنشاء طلب جديد.');
+  const id=result.meta.last_row_id;
   await clearSession(db,uid);
   const u=await getUser(db,uid);
-  const text=`🔔 طلب شحن جديد #${id}\n\n👤 ${short(u?.first_name,100)}\n🔗 ${u?.username?'@'+u.username:'بلا معرف'}\n🆔 ${uid}\n💳 ${moneyMethods[method]}\n💰 ${formatIQD(amount)}\n🔢 رقم التحويل: ${short(reference||'غير متوفر',150)}\n📎 إثبات: ${photoFileId?'صورة مرفقة':'رقم تحويل فقط'}\n⏳ الحالة: بانتظار التحقق من التحويل الفعلي.\n\nلإدارة الطلب: /admin`;
-  await notifyAdmins(db,env,text,photoFileId,keyboard([button('✅ قبول',`topup_approve:${id}`,'success'),button('❌ رفض',`topup_reject:${id}`,'danger')]));
+  const record=await db.prepare('SELECT * FROM topup_requests WHERE id=?').bind(id).first();
+  const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${moneyMethods[p.method]}\n💰 المطلوب: ${formatQuote(p)}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
+  await notifyAdmins(db,env,text,p.proofFileId||null,keyboard([button('✅ قبول الشحن',`topup_approve:${id}`,'success'),button('❌ رفض',`topup_reject:${id}`,'danger')]));
   ctx.waitUntil(flushOutbox(db,env));
-  return sendText(env,uid,`✅ تم تسجيل طلب الشحن رقم #${id}.\n\n${formatIQD(amount)} — ${moneyMethods[method]}\nسيُراجع المدير وصول التحويل ثم يتخذ القرار.`,keyboard(backRow()));
+  return sendText(env,uid,`🟡 تم إرسال طلب الشحن #${id} للمراجعة.\n\n💰 ${formatQuote(p)}\n💸 ${moneyMethods[p.method]}\n🗓️ ${baghdadDate(record.created_at)}\n\nتابع حالته من «طلباتي».`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
 }
 async function handleTextState(db,env,ctx,uid,message,session) {
-  if(session.action.startsWith('topup_') && env.ENABLE_MANUAL_TOPUPS!=='true'){
+  if(session.action.startsWith('topup_') && !await isTopupEnabled(db,env)){
     await clearSession(db,uid);
-    return sendText(env,uid,'⛔ تم إيقاف طلبات الشحن اليدوي.');
+    return sendText(env,uid,'⛔ تم إيقاف استقبال طلبات الشحن من الإدارة.');
   }
   const t=String(message.text??'').trim();
   if(session.action==='topup_custom'){
-    const amount=positiveInt(t.replace(/[\s,]/g,''));
-    if(!amount || amount<1000 || amount>10000000) return sendText(env,uid,'أدخل مبلغ شحن صحيحاً بالدينار العراقي بين 1,000 و10,000,000.');
-    await setSession(db,uid,'topup_reference',{method:session.payload.method,amount});
-    return sendText(env,uid,`💰 المبلغ: ${formatIQD(amount)}\n\nأرسل رقم العملية أو بيانات التحويل. إذا لم يوجد رقم، أرسل الرمز - ثم أرفق صورة الإثبات.`);
+    const current=session.payload.currency||'IQD';
+    const rate=await usdRate(db);
+    const minor=parseCustomMinor(t,current);
+    const quote=quoteMinor(current,minor,rate);
+    if(!quote)return sendText(env,uid,current==='USD'?'أدخل مبلغاً صحيحاً بين 1 و1,000 دولار، مثل 25 أو 25.50.':'أدخل مبلغاً صحيحاً بالدينار، بين 1,000 و10,000,000، دون فواصل عشرية.');
+    const extended={...quote,quoteKey:crypto.randomUUID()};
+    await setSession(db,uid,'topup_choose_method',extended);
+    return ui.topupMethods(db,env,uid,extended);
   }
-  if(session.action==='topup_reference') {
-    if(!t || t.length>180) return sendText(env,uid,'أرسل رقم تحويل صالحاً لا يتجاوز 180 حرفاً، أو الرمز - إذا لا يوجد رقم.');
-    const reference=t==='-'?null:t;
-    await setSession(db,uid,'topup_proof',{...session.payload,reference});
-    return sendText(env,uid,reference?'📷 أرسل صورة الإيصال الآن، أو اكتب /skip إذا كان رقم التحويل كافياً.':'📷 أرسل صورة إثبات الشحن، فهي مطلوبة عند عدم توفر رقم تحويل.');
-  }
-  if(session.action==='topup_proof') {
-    if(t==='/skip') return writeTopup(db,env,ctx,uid,session);
-    return sendText(env,uid,'أرسل صورة الإثبات، أو استخدم /skip إذا أرسلت رقم التحويل سابقاً.');
+  if(session.action==='topup_evidence'||session.action==='topup_confirm'){
+    if(!t || t.length>180 || t==='/skip')return sendText(env,uid,'أرسل رقم حوالة صحيحاً لا يتجاوز 180 حرفاً، أو أرفق صورة إيصال.');
+    if(t==='-')return sendText(env,uid,'إذا لم يكن لديك رقم حوالة، أرسل صورة إثبات التحويل بدلاً منه.');
+    const payload={...session.payload,reference:t,nonce:session.payload.nonce||crypto.randomUUID()};
+    await setSession(db,uid,'topup_confirm',payload);
+    return ui.topupConfirm(db,env,uid,payload);
   }
   if(session.action==='search'){
     if(!t || t.length>80) return sendText(env,uid,'أدخل كلمة بحث بين 1 و80 حرفاً.');
@@ -115,6 +131,8 @@ async function handleMessage(db,env,ctx,message){
   if(text==='/admin')return adminMenu(db,env,uid);
   if(text==='/orders')return ui.orders(db,env,uid);
   if(text==='/wallet')return ui.wallet(db,env,uid);
+  if(text==='/topup')return await isTopupEnabled(db,env)?ui.topupPresets(db,env,uid):ui.wallet(db,env,uid);
+  if(text==='/currency')return ui.currencyMenu(db,env,uid);
   if(text==='/support'){
     await setSession(db,uid,'support');
     const instructions=await getSetting(db,'support_instructions','');
@@ -144,14 +162,16 @@ async function handleMessage(db,env,ctx,message){
   const session=await getSession(db,uid);
   if(session){
     if(session.action.startsWith('owner_') && await handleAdminText(db,env,uid,session,message))return;
-    if(message.photo?.length && session.action==='topup_proof') {
+    if(message.photo?.length && (session.action==='topup_evidence'||session.action==='topup_confirm')) {
       const pic=message.photo.at(-1);
-      return writeTopup(db,env,ctx,uid,session,pic.file_id,pic.file_unique_id);
+      const payload={...session.payload,proofFileId:pic.file_id,proofUniqueId:pic.file_unique_id,nonce:session.payload.nonce||crypto.randomUUID()};
+      await setSession(db,uid,'topup_confirm',payload);
+      return ui.topupConfirm(db,env,uid,payload);
     }
     const result=await handleTextState(db,env,ctx,uid,message,session);
     if(result!==null)return result;
   }
-  if(message.photo?.length)return sendText(env,uid,'للشحن، افتح 👛 محفظتي أولاً.');
+  if(message.photo?.length)return sendText(env,uid,'للشحن، افتح 💳 محفظتي أولاً.');
   return sendText(env,uid,'اختر أحد الأقسام من القائمة الرئيسية أو اكتب /start.',keyboard([button('🏠 الرئيسية','home')]));
 }
 async function adminMenu(db,env,uid,messageId=null){
@@ -166,7 +186,7 @@ async function adminMenu(db,env,uid,messageId=null){
 🛍️ طلبات الشراء المعلقة: ${orders?.n||0}
 
 🔒 الصلاحية محصورة في Telegram ID المحدد في Cloudflare.`,keyboard(
-    [button('🛍️ طلبات الشراء','admin_orders','primary'),button('💳 طلبات الشحن','admin_topups')],
+    [button('🛍️ طلبات الشراء','admin_orders','primary'),button('💳 طلبات الشحن','admin_topups','success')],
     [button('📦 بانتظار التسليم','admin_delivery')],
     [button('📦 المنتجات والأسعار','admin_products:0'),button('📂 الأقسام','admin_manage_categories')],
     [button('➕ إضافة منتج','admin_addproduct'),button('➕ إضافة قسم','admin_addcategory')],
@@ -180,7 +200,7 @@ async function adminList(db,env,uid,type){
     const rows=(await db.prepare("SELECT t.*,u.first_name,u.username FROM topup_requests t JOIN users u ON u.tg_id=t.user_tg_id WHERE t.status='pending' ORDER BY t.id LIMIT 10").all()).results??[];
     if(!rows.length)return sendText(env,uid,'✅ لا توجد طلبات شحن معلقة.',keyboard([button('🛡️ الإدارة','admin')],backRow()));
     for(const r of rows){
-      await sendText(env,uid,`💳 طلب شحن #${r.id}\n👤 ${short(r.first_name,80)} (${r.user_tg_id})\n@${r.username||'بدون_معرف'}\n💰 ${formatIQD(r.amount_iqd)}\nالوسيلة: ${moneyMethods[r.method]}\nرقم التحويل: ${short(r.transfer_reference||'غير متوفر',120)}\n⚠️ تحقّق من وصول التحويل بنفسك قبل الموافقة.`,keyboard(
+      await sendText(env,uid,`💳 طلب شحن #${r.id}\n👤 ${short(r.first_name,80)} (${r.user_tg_id})\n@${r.username||'بدون_معرف'}\n💰 ${formatIQD(r.amount_iqd)}\nالوسيلة: ${moneyMethods[r.method]}\n🗓️ وقت الطلب: ${baghdadDate(r.created_at)}\nرقم التحويل: ${short(r.transfer_reference||'غير متوفر',120)}\n⚠️ تحقّق من وصول التحويل بنفسك قبل الموافقة.`,keyboard(
         [button('✅ قبول',`topup_approve:${r.id}`,'success'),button('❌ رفض',`topup_reject:${r.id}`,'danger')],
         r.proof_file_id?[button('📷 عرض الإثبات',`topup_photo:${r.id}`)]:[]));
     }
@@ -206,17 +226,23 @@ async function invoice(db,env,uid,orderId){
 }
 async function approveTopup(db,env,uid,id,approve){
   if(!isAdmin(env,uid))return;
+  if(!Number.isSafeInteger(id)||id<=0)return sendText(env,uid,'رقم طلب غير صحيح.');
   const newStatus=approve?'approved':'rejected';
   const operations=[db.prepare("UPDATE topup_requests SET status=?,decided_by=?,decided_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'").bind(newStatus,uid,id)];
   if(approve)operations.push(db.prepare(`INSERT OR IGNORE INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key,note)
     SELECT user_tg_id,amount_iqd,'topup','topup:' || id,'Admin-verified manual topup'
-    FROM topup_requests WHERE id=? AND status='approved'`).bind(id));
+    FROM topup_requests WHERE id=? AND status='approved'`)
+    .bind(id));
   const res=await db.batch(operations);
-  if(!res[0].meta?.changes)return sendText(env,uid,'⚠️ الطلب غير موجود أو تمت معالجته بالفعل.');
+  if(!res[0].meta?.changes)return sendText(env,uid,'⚠️ الطلب غير موجود أو عولج سابقاً. لم يتغير أي رصيد.');
   await audit(db,uid,approve?'approve':'reject','topup',id);
   const row=await db.prepare('SELECT * FROM topup_requests WHERE id=?').bind(id).first();
-  await notifyUser(db,row.user_tg_id,approve?`✅ تمت الموافقة على شحن المحفظة #${id}\nأضيف ${formatIQD(row.amount_iqd)} إلى رصيدك الداخلي.`:`❌ رُفض طلب الشحن #${id}. تواصل مع الدعم لمزيد من المعلومات.`);
-  return sendText(env,uid,`✅ تم ${approve?'قبول':'رفض'} طلب الشحن #${id}.`);
+  const user=await getUser(db,row.user_tg_id);
+  const msg=approve
+    ? `✅ تم شحن محفظتك بنجاح\n\n🧾 رقم الطلب: #${id}\n💰 المبلغ المضاف: ${formatQuote({currency:row.requested_currency,requestedMinor:row.requested_amount_minor,amountIqd:row.amount_iqd})}\n💳 الرصيد الحالي: ${formatIQD(user.wallet_balance_iqd)}\n💸 الوسيلة: ${moneyMethods[row.method]}\n🟢 الحالة: ناجحة\n🗓️ التاريخ والوقت: ${baghdadDate(row.decided_at)}\n\nشكراً لثقتك بمتجر My Store.`
+    : `❌ تم رفض طلب شحن المحفظة #${id}.\n\n💰 المبلغ: ${formatIQD(row.amount_iqd)}\n🗓️ التاريخ: ${baghdadDate(row.decided_at)}\nلم يُضف أي مبلغ إلى الرصيد. للتفاصيل راسل /support.`;
+  await notifyUser(db,row.user_tg_id,msg,keyboard([button('📦 طلباتي','orders','primary'),button('💳 المحفظة','wallet','success')]));
+  return sendText(env,uid,`✅ ${approve?'قُبل':'رُفض'} طلب الشحن #${id}، وجرى تسجيل القرار وإشعار العميل.`);
 }
 async function decideOrder(db,env,uid,id,approve){
   if(!isAdmin(env,uid))return;
@@ -349,27 +375,65 @@ ${short(p.title,100)}
     return sendText(env,uid,`✅ تم إنشاء طلبك #${oid}.\n\nبانتظار موافقة المدير. لن يُطلب منك الدفع قبل الموافقة.`,keyboard([button('📦 طلباتي','orders')],backRow()));
   }
   if(data.startsWith('pay:'))return invoice(db,env,uid,Number(data.split(':')[1]));
-  if(data==='topup'){
-    if(env.ENABLE_MANUAL_TOPUPS!=='true')return sendText(env,uid,'⛔ الشحن اليدوي غير مفعّل حالياً. الدفع مقابل المنتجات الرقمية يتم عبر Telegram Stars.',keyboard(backRow()));
-    return ui.topupMethods(db,env,uid,q.message?.message_id);
+  if(data==='currency')return ui.currencyMenu(db,env,uid,q.message?.message_id);
+  if(data.startsWith('currency_set:')){
+    const currency=data.split(':')[1];
+    if(!['IQD','USD'].includes(currency))return;
+    await clearSession(db,uid);
+    await db.prepare('UPDATE users SET currency_preference=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(currency,uid).run();
+    return ui.currencyMenu(db,env,uid,q.message?.message_id);
   }
-  if(data.startsWith('topup_method:') || data.startsWith('topup_custom:') || data.startsWith('topup_amount:')){
-    if(env.ENABLE_MANUAL_TOPUPS!=='true')return sendText(env,uid,'⛔ الشحن اليدوي غير مفعّل حالياً.');
+  if(data==='topup'){
+    if(!await isTopupEnabled(db,env))return sendText(env,uid,'⏳ طلبات شحن المحفظة لم تُفعّل بعد. يمكنك التواصل مع الدعم.',keyboard([button('💳 المحفظة','wallet','primary')],backRow()));
+    return ui.topupPresets(db,env,uid,q.message?.message_id);
+  }
+  if(data.startsWith('topup_status:')){
+    const id=positiveInt(data.split(':')[1]);
+    if(!id)return;
+    return ui.topupStatusView(db,env,uid,id,q.message?.message_id);
+  }
+  if(data==='topup_cancel'){
+    await clearSession(db,uid);
+    return ui.wallet(db,env,uid,q.message?.message_id);
+  }
+  if(/^(?:topup_preset:|topup_custom$|topup_method:|topup_submit:)/.test(data) && !await isTopupEnabled(db,env))
+    return sendText(env,uid,'⛔ أوقفت الإدارة استقبال طلبات الشحن حالياً.');
+  if(data.startsWith('topup_preset:')){
+    const [,rawUsd,displayedCurrency]=data.split(':');
+    const usd=positiveInt(rawUsd);
+    if(!USD_PRESETS.includes(usd)||!['IQD','USD'].includes(displayedCurrency))return;
+    const w=await ui.walletSummary(db,uid);
+    if(w.currency!==displayedCurrency)return sendText(env,uid,'تغيرت العملة منذ عرض هذه الأزرار؛ افتح قائمة الشحن مجدداً.');
+    const quote=quoteFromUSD(usd,w.rate,w.currency);
+    if(!quote)return sendText(env,uid,'لا يمكن تحديد المبلغ قبل ضبط سعر الصرف.');
+    const extended={...quote,quoteKey:crypto.randomUUID()};
+    await setSession(db,uid,'topup_choose_method',extended);
+    return ui.topupMethods(db,env,uid,extended,q.message?.message_id);
+  }
+  if(data==='topup_custom'){
+    const w=await ui.walletSummary(db,uid);
+    await setSession(db,uid,'topup_custom',{currency:w.currency});
+    return sendText(env,uid,`✏️ أدخل المبلغ المخصص بعملة ${w.currency}\n\n${w.currency==='USD'?'مثال: 25.50':'مثال: 25000'}\nللإلغاء: /cancel`);
   }
   if(data.startsWith('topup_method:')){
-    const method=data.split(':')[1];if(!moneyMethods[method])return;
-    return ui.topupAmounts(db,env,uid,method,q.message?.message_id);
+    const [,method,quoteKey]=data.split(':');
+    const session=await getSession(db,uid);
+    if(!session || session.action!=='topup_choose_method' || session.payload.quoteKey!==quoteKey)return sendText(env,uid,'انتهت هذه الخطوة. افتح شحن المحفظة وحدد المبلغ أولاً.');
+    if(!['zain_balance','superqi','binance'].includes(method))return;
+    if(!await receiverFor(db,env,method))return sendText(env,uid,'هذه الوسيلة غير مهيأة لدى الإدارة بعد.');
+    const payload={...session.payload,method,reference:null,proofFileId:null,proofUniqueId:null};
+    await setSession(db,uid,'topup_evidence',payload);
+    return ui.topupEvidence(db,env,uid,payload,method,q.message?.message_id);
   }
-  if(data.startsWith('topup_custom:')){
-    const method=data.split(':')[1];if(!moneyMethods[method])return;
-    await setSession(db,uid,'topup_custom',{method});
-    return sendText(env,uid,'✍️ أدخل مبلغ الشحن بالدينار العراقي (مثال: 25000).');
-  }
-  if(data.startsWith('topup_amount:')){
-    const [,method,num]=data.split(':'),amount=positiveInt(num);
-    if(!moneyMethods[method] || !amount || amount<1000 || amount>10000000)return;
-    await setSession(db,uid,'topup_reference',{method,amount});
-    return sendText(env,uid,`💰 مبلغ الشحن: ${formatIQD(amount)}\n\nأرسل رقم العملية أو بيانات التحويل. إذا لا يوجد رقم اكتب - ثم أرسل صورة الإثبات.`);
+  if(data.startsWith('topup_submit:')){
+    const nonce=data.slice('topup_submit:'.length);
+    if(!/^[0-9a-f-]{36}$/i.test(nonce))return;
+    const session=await getSession(db,uid);
+    if(!session || session.action!=='topup_confirm' || session.payload.nonce!==nonce){
+      const previous=await db.prepare('SELECT id FROM topup_requests WHERE user_tg_id=? AND submission_key=?').bind(uid,nonce).first();
+      return sendText(env,uid,previous?`✅ سُجل طلبك بالفعل برقم #${previous.id}.`:'هذه رسالة تأكيد قديمة. افتح المحفظة وابدأ طلباً جديداً.');
+    }
+    return writeTopup(db,env,ctx,uid,session,q.message?.message_id);
   }
   if(data==='admin')return adminMenu(db,env,uid,q.message?.message_id);
   if(data==='admin_topups')return adminList(db,env,uid,'topups');

@@ -2,12 +2,13 @@ import {button,keyboard,short,formatStars,formatIQD,positiveInt,isAdmin} from '.
 import {sendText,sendOrEditText} from './telegram.js';
 import {setSession,clearSession,audit,getUser} from './database.js';
 import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './settings.js';
+import {usdRate,receiverFor} from './wallet.js';
 
 const adminBack=[button('🛡️ لوحة المدير','admin')];
 const backTo=(destination)=>[button('⬅️ رجوع',destination)];
 
 export function adminRoute(data){
-  return /^(?:admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function stats(db,env,uid,messageId=null){
@@ -39,11 +40,11 @@ async function settings(db,env,uid,page=0,messageId=null){
 async function settingDetail(db,env,uid,key,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
   const def=SETTING_FIELDS[key];if(!def)return reply('الإعداد غير معروف.');
-  const fallback=key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':'';
+  const fallback=key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':key==='manual_topups_enabled'?env.ENABLE_MANUAL_TOPUPS||'false':'';
   const value=await getSetting(db,key,fallback||'');
-  const rows=def.toggle?[[button(value==='false'?'✅ تشغيل استقبال الطلبات':'⏸️ إيقاف الطلبات الجديدة','admin_toggle_store',value==='false'?'success':'danger')]]:[[button('✏️ تعديل','admin_setting_edit:'+key)]];
+  const rows=def.toggle?[[button(value==='false'?(key==='manual_topups_enabled'?'✅ تشغيل الشحن':'✅ تشغيل استقبال الطلبات'):(key==='manual_topups_enabled'?'⏸️ إيقاف الشحن':'⏸️ إيقاف الطلبات الجديدة'),key==='manual_topups_enabled'?'admin_toggle_topups':'admin_toggle_store',value==='false'?'success':'danger')]]:[[button('✏️ تعديل','admin_setting_edit:'+key)]];
   rows.push(backTo('admin_settings:0'),adminBack);
-  return reply(`${def.label}\n\nالقيمة الحالية:\n${short(value||'لم يتم التحديد بعد',1750)}\n\n${def.toggle?'الإيقاف يمنع إنشاء طلبات جديدة، ولا يُلغي الطلبات المدفوعة أو المعلقة.':'اكتب نصاً جديداً عند الضغط على تعديل، أو كلمة /empty لمسح الحقول الاختيارية.'}`,keyboard(...rows));
+  return reply(`${def.label}\n\nالقيمة الحالية:\n${short(value||'لم يتم التحديد بعد',1750)}\n\n${def.toggle?(key==='manual_topups_enabled'?'يمكن تعطيل الشحن دون إلغاء طلبات الشحن التي سبق إرسالها.':'الإيقاف يمنع إنشاء طلبات شراء جديدة ولا يلغي الطلبات السابقة.'):'اكتب نصاً جديداً عند الضغط على تعديل، أو كلمة /empty لمسح الحقول الاختيارية.'}`,keyboard(...rows));
 }
 
 async function products(db,env,uid,page=0,messageId=null){
@@ -142,6 +143,20 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await audit(db,uid,'toggle','setting',0);
     await settingDetail(db,env,uid,'store_enabled',messageId);
   }
+  else if(data==='admin_toggle_topups'){
+    const current=await getSetting(db,'manual_topups_enabled',env.ENABLE_MANUAL_TOPUPS||'false');
+    if(current!=='true'){
+      const rate=await usdRate(db);
+      const receivers=await Promise.all(['zain_balance','superqi','binance'].map(m=>receiverFor(db,env,m)));
+      if(!rate || !receivers.some(Boolean)){
+        await sendText(env,uid,'⚠️ قبل تفعيل الشحن، حدّد سعر الدولار بالدينار ووسيلة استلام واحدة على الأقل من إعدادات المدير.');
+        return true;
+      }
+    }
+    await updateSetting(db,'manual_topups_enabled',current==='true'?'false':'true',uid);
+    await audit(db,uid,'toggle_manual_topups','setting',0);
+    await settingDetail(db,env,uid,'manual_topups_enabled',messageId);
+  }
   else if(data.startsWith('admin_setting_edit:')){
     const key=data.substring('admin_setting_edit:'.length);
     if(!SETTING_FIELDS[key]||SETTING_FIELDS[key].toggle)return true;
@@ -204,7 +219,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await setSession(db,uid,'owner_user_search');
     await sendText(env,uid,'🔎 اكتب Telegram ID للعميل الذي تريد عرض ملفه. للإلغاء /cancel.');
   }
-  else if(data==='admin_help')await sendText(env,uid,'📖 دليل الإدارة\n\n• تعديل الأسعار والنصوص من الأزرار داخل لوحة المدير.\n• الطلبات والمدفوعات لا تكتمل دون مراجعتك.\n• إخفاء منتج لا يمسح الطلبات القديمة.\n• أسرار Cloudflare وهوية المدير لا يمكن تغييرهما من داخل البوت.\n• الشحن اليدوي معطل افتراضياً ولا يُستخدم بديلاً عن Telegram Stars.\n• للتراجع عن أي عملية تحرير: /cancel.',keyboard(adminBack));
+  else if(data==='admin_help')await sendText(env,uid,'📖 دليل الإدارة\n\n• تعديل الأسعار والنصوص من الأزرار داخل لوحة المدير.\n• الطلبات والمدفوعات لا تكتمل دون مراجعتك.\n• إخفاء منتج لا يمسح الطلبات القديمة.\n• أسرار Cloudflare وهوية المدير لا يمكن تغييرهما من داخل البوت.\n• لتفعيل طلبات الشحن، أدخل سعر الصرف وبيانات استلام رصيد زين أو سوبر كي أو Binance، ثم فعّل الزر من الإعدادات. لا تستخدم الرصيد الداخلي بديلاً عن Stars لبيع الخدمات الرقمية.\n• للتراجع عن أي عملية تحرير: /cancel.',keyboard(adminBack));
   return true;
 }
 
