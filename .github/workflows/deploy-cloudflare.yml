@@ -1,0 +1,84 @@
+name: Deploy My Store to Cloudflare
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: my-store-cloudflare
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      ADMIN_ID: ${{ secrets.ADMIN_ID }}
+      CI: 'true'
+      NO_COLOR: '1'
+    steps:
+      - name: Checkout verified main branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN TELEGRAM_BOT_TOKEN ADMIN_ID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+          if ! [[ "$ADMIN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::ADMIN_ID must be numeric."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: Find or create D1 and patch local deployment config
+        run: node scripts/prepare-cloudflare-d1.mjs
+
+      - name: Apply D1 migrations before deployment
+        run: npx wrangler d1 migrations apply telegram_store --remote
+
+      - name: Deploy Worker
+        run: npx wrangler deploy
+
+      - name: Configure runtime secrets and Telegram webhook
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$TELEGRAM_BOT_TOKEN" | npx wrangler secret put TELEGRAM_BOT_TOKEN
+          printf '%s' "$ADMIN_ID" | npx wrangler secret put ADMIN_ID
+          WEBHOOK_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"
+          echo "::add-mask::$WEBHOOK_SECRET"
+          printf '%s' "$WEBHOOK_SECRET" | npx wrangler secret put WEBHOOK_SECRET
+          export WEBHOOK_SECRET
+          node scripts/finish-cloudflare-deploy.mjs
+
+      - name: Summary
+        if: success()
+        run: |
+          echo '### My Store deployment' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Worker and D1 deployed; migrations applied.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Telegram webhook configured and health checked.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Send /start, then /admin from the private owner account to verify.' >> "$GITHUB_STEP_SUMMARY"
