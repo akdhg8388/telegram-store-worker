@@ -2,6 +2,7 @@ import {getSetting} from './settings.js';
 
 // Financial values and identities come from D1. Editors only change presentation.
 // {balance} displays exactly one preferred currency, without a second conversion.
+export const DEFAULT_HOME_TEMPLATE_EN=`👋 Welcome to {store}!\n\nBuy digital products instantly from our store.\n\n💰 Your balance: {balance}\n👤 Name: {name}\n🆔 ID: {id}\n👥 Users: {users}`;
 export const DEFAULT_HOME_TEMPLATE=`👋 أهلاً بك في {store}!\n\nاشترِ المنتجات الرقمية مباشرة من هنا.\n\n💰 رصيدك: {balance}\n👤 الاسم: {name}\n🆔 المعرّف: {id}\n👥 المستخدمون: {users}`;
 
 export const UI_EMOJI_SETTINGS=Object.freeze({
@@ -11,7 +12,7 @@ export const UI_EMOJI_SETTINGS=Object.freeze({
 });
 const PLACEHOLDER=/\{(store|balance|balance_iqd|balance_usd|name|id|users|instructions)\}/g;
 const INLINE_EMOJI=/\[\[emoji:(\d{10,30})\|([^\]\r\n]{1,16})\]\]/g;
-const HOME_BOLD_LABELS=['رصيدك:','الاسم:','المعرّف:','المستخدمون:'];
+const HOME_BOLD_LABELS=['رصيدك:','الاسم:','المعرّف:','المستخدمون:','Your balance:','Name:','ID:','Users:'];
 
 export function renderHomeTemplate(template,values){
   // Upgrade the V9 default balance fragment even if it was saved as an owner template.
@@ -59,7 +60,7 @@ export function homeTextAndEntities(rendered){
   // Bold the main greeting and field names; keep user-generated values normal.
   const firstEnd=text.indexOf('\n');
   const headingLength=firstEnd>=0?firstEnd:text.length;
-  if(headingLength>0 && headingLength<=150 && /أهلاً|مرحبا|مرحباً/.test(text.slice(0,headingLength)))
+  if(headingLength>0 && headingLength<=150 && /أهلاً|مرحبا|مرحباً|Welcome/.test(text.slice(0,headingLength)))
     entities.push({type:'bold',offset:0,length:headingLength});
   for(const label of HOME_BOLD_LABELS){
     const offset=text.indexOf(label);
@@ -81,9 +82,9 @@ export async function decoratedMessage(db,key,text){
   return {text:content,options:{entities:[{type:'custom_emoji',offset:0,length:symbol.length,custom_emoji_id:id}]}};
 }
 
-export async function decoratedHome(db,text){
+export async function decoratedHome(db,text,customEmojiValue=null){
   const formatted=homeTextAndEntities(text);
-  const setting=await getSetting(db,'home_custom_emoji_id','');
+  const setting=customEmojiValue===null?await getSetting(db,'home_custom_emoji_id',''):customEmojiValue;
   if(/^\d{10,30}$/.test(setting)){
     const first=Array.from(new Intl.Segmenter('ar',{granularity:'grapheme'}).segment(formatted.text))[0]?.segment||'';
     const symbol=/\p{Extended_Pictographic}/u.test(first)?first:'✨';
@@ -100,4 +101,18 @@ export async function decoratedHome(db,text){
   if(formatted.text.length>max)formatted.text=formatted.text.slice(0,max);
   const entities=formatted.entities.filter(e=>e.offset>=0 && e.offset+e.length<=formatted.text.length);
   return {text:formatted.text,options:{entities}};
+}
+
+// Product heading, price and stock can each have a real Telegram custom emoji
+// entity; icons on inline buttons are a separate Bot API feature.
+export function decorateProductText(text,icons={}){
+  const entries=[['product','🛍️'],['price','💰'],['stock','📦']];
+  const entities=[];
+  for(const [kind,symbol] of entries){
+    const id=icons[kind];
+    if(!/^\d{10,30}$/.test(String(id||'')))continue;
+    const position=text.indexOf(symbol);
+    if(position>=0)entities.push({type:'custom_emoji',offset:position,length:symbol.length,custom_emoji_id:String(id)});
+  }
+  return {text,options:entities.length?{entities}:{}};
 }

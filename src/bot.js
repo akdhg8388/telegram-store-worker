@@ -1,3 +1,5 @@
+import {CUSTOMER_COMMANDS,OWNER_COMMANDS,CUSTOMER_COMMANDS_EN,OWNER_COMMANDS_EN} from './commands.js';
+import {userLanguage,choice} from './i18n.js';
 import {button,keyboard,backRow,adminIds,isAdmin,positiveInt,short,formatStars,formatIQD,moneyMethods,orderNames} from './common.js';
 import {telegram,sendText,sendOrEditText,answerCallback,queueNotification,flushOutbox} from './telegram.js';
 import {ensureUser,getUser,setSession,getSession,clearSession,getProduct,audit} from './database.js';
@@ -415,8 +417,21 @@ async function handleCallback(db,env,ctx,q){
     const url=await getSetting(db,'news_url',env.NEWS_URL||'');
     return url.startsWith('https://')?sendText(env,uid,`📢 قناة الأخبار: ${url}`,keyboard(backRow())):sendText(env,uid,'لم يضف المدير قناة أخبار بعد.',keyboard(backRow()));
   }
-  if(data==='language')return sendText(env,uid,'🌐 اللغة الحالية: العربية\n\nسيتم دعم لغات إضافية بترجمة كاملة في تحديث لاحق.',keyboard([button('🇮🇶 العربية','language_ar')],backRow()));
-  if(data==='language_ar')return sendText(env,uid,'✅ اللغة العربية مفعّلة.',keyboard(backRow()));
+  if(data==='language')return sendOrEditText(env,uid,choice(env,
+    '🌐 اختر لغة المتجر:\n\nاللغة الحالية: العربية/English',
+    '🌐 Choose your store language:\n\nSelect Arabic or English below.'),keyboard(
+      [button('🇮🇶 العربية','language_ar','primary'),button('🇬🇧 English','language_en','success')],backRow()),q.message?.message_id);
+  if(data==='language_ar'||data==='language_en'){
+    const lang=data==='language_en'?'en':'ar';
+    await db.prepare('UPDATE users SET language=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(lang,uid).run();
+    env.__locale=lang;
+    // Per-chat commands match the customer's chosen store language even when
+    // their Telegram application itself uses a different device language.
+    const menuCommands=isAdmin(env,uid)?(lang==='en'?OWNER_COMMANDS_EN:OWNER_COMMANDS):(lang==='en'?CUSTOMER_COMMANDS_EN:CUSTOMER_COMMANDS);
+    ctx.waitUntil(telegram(env,'setMyCommands',{scope:{type:'chat',chat_id:uid},commands:menuCommands})
+      .catch(e=>console.error('Failed to update user command language',String(e))));
+    return ui.home(db,env,uid,q.message?.message_id);
+  }
   if(data==='referrals'){
     const count=await db.prepare('SELECT count(*) n FROM referrals WHERE referrer_tg_id=?').bind(uid).first();
     const link=env.BOT_USERNAME?`https://t.me/${env.BOT_USERNAME.replace('@','')}?start=ref_${uid}`:'سيظهر الرابط عند ضبط BOT_USERNAME';
@@ -597,6 +612,9 @@ export async function processUpdate(db,env,ctx,update){
     const done=await db.prepare('SELECT 1 AS yes FROM processed_updates WHERE update_id=?').bind(update.update_id).first();
     if(done)return;
   }
+  // Per-update locale, never mutate the shared Cloudflare environment.
+  const incomingId=update.callback_query?.from?.id||update.message?.from?.id||update.pre_checkout_query?.from?.id;
+  env={...env,__locale:await userLanguage(db,incomingId)};
   if(update.pre_checkout_query) await telegram(env,'answerPreCheckoutQuery',{pre_checkout_query_id:update.pre_checkout_query.id,ok:false,error_message:'تم إيقاف نظام النجوم للطلبات الجديدة. تواصل مع الدعم بشأن الطلبات السابقة.'});
   else if(update.message?.successful_payment) {
     await ensureUser(db,update.message.from);

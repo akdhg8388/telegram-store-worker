@@ -4,17 +4,53 @@ import {updateBotProfilePicture} from './bot-profile.js';
 import {setSession,getSession,clearSession,audit,getUser} from './database.js';
 import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './settings.js';
 import {usdRate,receiverFor} from './wallet.js';
-import {DEFAULT_HOME_TEMPLATE,preserveCustomEmojiInTemplate} from './presentation.js';
+import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,preserveCustomEmojiInTemplate} from './presentation.js';
 import {home as customerHomePreview} from './ui.js';
 import {restrictionLabel} from './moderation.js';
+import {HOME_BUTTONS,ICON_SLOTS,homeSettingKey,productIconKey,loadVisualSettings,resolvedHomeButton} from './home-buttons.js';
 
 const adminBack=[button('🛡️ لوحة المدير','admin')];
 const backTo=(destination)=>[button('⬅️ رجوع',destination)];
 
 export function adminRoute(data){
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
+async function homeButtonList(db,env,uid,page=0,messageId=null){
+  const visual=await loadVisualSettings(db);
+  const rows=[];
+  const current=HOME_BUTTONS.slice(page*7,(page+1)*7);
+  for(const b of current){
+    const shown=resolvedHomeButton(visual,b.id,'ar');
+    rows.push([button(`${shown.icon?'✨':'▫️'} ${short(shown.text,35)}`,`admin_home_button:${b.id}`,'primary')]);
+  }
+  const nav=[];
+  if(page)nav.push(button('⬅️ السابق',`admin_home_buttons:${page-1}`));
+  if((page+1)*7<HOME_BUTTONS.length)nav.push(button('التالي ➡️',`admin_home_buttons:${page+1}`));
+  if(nav.length)rows.push(nav);
+  rows.push([button('↩️ استعادة جميع أسماء ورموز الرئيسية','admin_home_reset_all','danger')]);
+  rows.push([button('👁️ معاينة الرئيسية','admin_visual_preview','success')],[button('🎨 تخصيص الواجهة','admin_visuals')],adminBack);
+  return sendOrEditText(env,uid,'🎨 تخصيص أزرار الرئيسية\n\nاختر الزر لتعديل اسمه بالعربي والإنجليزي ورمزه المتحرك، بدون تغيير وظيفته.',keyboard(...rows),messageId);
+}
+async function homeButtonDetail(db,env,uid,key,messageId=null){
+  const def=HOME_BUTTONS.find(x=>x.id===key);
+  if(!def)return;
+  const visual=await loadVisualSettings(db);
+  const ar=resolvedHomeButton(visual,key,'ar');
+  const en=resolvedHomeButton(visual,key,'en');
+  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n🇬🇧 English: ${en.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n\nالتغيير يخص اسم الزر ورمزه فقط؛ مساره وصلاحياته لا تتغير.`,keyboard(
+    [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
+    [button('✏️ Edit English label',`admin_setting_edit:${homeSettingKey(key,'label_en')}`)],
+    [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
+    [button('↩️ استعادة هذا الزر للأصل',`admin_home_button_reset:${key}`,'danger')],
+    [button('🎨 قائمة أزرار الرئيسية','admin_home_buttons:0')],adminBack),messageId);
+}
+async function productIconsMenu(db,env,uid,messageId=null){
+  const settings=await loadVisualSettings(db);
+  const rows=ICON_SLOTS.map(x=>[button(`${settings[productIconKey(x.id)]?'✅':'▫️'} ${x.ar}`,`admin_setting_edit:${productIconKey(x.id)}`,'primary')]);
+  rows.push([button('🎨 تخصيص الواجهة','admin_visuals')],adminBack);
+  return sendOrEditText(env,uid,'✨ رموز المنتجات والسعر والمخزون\n\nالرموز تظهر داخل تفاصيل المنتج؛ رمز المنتج يظهر كذلك على زر المنتج في القائمة. يمكن إعطاء منتج معيّن رمزاً مختلفاً من صفحة إدارته.\n\nارسل إيموجي متحركاً فعلياً أو معرّفه، واكتب /empty للإزالة.',keyboard(...rows),messageId);
+}
 async function stats(db,env,uid,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
   const [users,products,categories,pending,paid,topups,sales,walletSales]=await Promise.all([
@@ -32,7 +68,7 @@ async function stats(db,env,uid,messageId=null){
 
 async function settings(db,env,uid,page=0,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
-  const entries=Object.entries(SETTING_FIELDS).filter(([,def])=>!def.internal);
+  const entries=Object.entries(SETTING_FIELDS).filter(([key,def])=>!def.internal && !key.startsWith('home_button_') && !['product_custom_emoji_id','price_custom_emoji_id','stock_custom_emoji_id'].includes(key));
   const pageSize=6, offset=Math.max(0,Math.min(page,Math.ceil(entries.length/pageSize)-1))*pageSize;
   const rows=entries.slice(offset,offset+pageSize).map(([key,def])=>[button(def.label,`admin_setting:${key}`)]);
   const nav=[];
@@ -45,7 +81,7 @@ async function settings(db,env,uid,page=0,messageId=null){
 async function settingDetail(db,env,uid,key,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
   const def=SETTING_FIELDS[key];if(!def)return reply('الإعداد غير معروف.');
-  const fallback=key==='home_template'?DEFAULT_HOME_TEMPLATE:key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':key==='manual_topups_enabled'?env.ENABLE_MANUAL_TOPUPS||'false':'';
+  const fallback=key==='home_template'?DEFAULT_HOME_TEMPLATE:key==='home_template_en'?DEFAULT_HOME_TEMPLATE_EN:key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':key==='manual_topups_enabled'?env.ENABLE_MANUAL_TOPUPS||'false':'';
   const value=await getSetting(db,key,fallback||'');
   const rows=def.toggle?[[button(value==='false'?(key==='manual_topups_enabled'?'✅ تشغيل الشحن':key==='support_direct_enabled'?'✅ إظهار زر المسؤول':'✅ تشغيل استقبال الطلبات'):(key==='manual_topups_enabled'?'⏸️ إيقاف الشحن':key==='support_direct_enabled'?'🙈 إخفاء زر المسؤول':'⏸️ إيقاف الطلبات الجديدة'),key==='manual_topups_enabled'?'admin_toggle_topups':key==='support_direct_enabled'?'admin_toggle_support_direct':'admin_toggle_store',value==='false'?'success':'danger')]]:[[button('✏️ تعديل','admin_setting_edit:'+key)]];
   if(key==='support_direct_enabled')rows.push([button('👤 إعداد حساب المسؤول','admin_setting:support_direct_username','primary')]);
@@ -70,6 +106,9 @@ async function products(db,env,uid,page=0,messageId=null){
 }
 const PRODUCT_FIELDS={
   title:{label:'🏷️ الاسم',max:150},
+  title_en:{label:'🇬🇧 English product name',max:150},
+  description_en:{label:'🇬🇧 English description',max:1800},
+  usage_instructions_en:{label:'🇬🇧 English usage instructions',max:1800},
   description:{label:'📝 الوصف',max:1800},
   price_iqd:{label:'💰 سعر المحفظة بالدينار',integer:true,min:1,max:100000000},
   usage_instructions:{label:'📖 طريقة الاستخدام',max:1800},
@@ -97,8 +136,9 @@ async function productDetail(db,env,uid,id,messageId=null){
   const p=await db.prepare('SELECT p.*,c.title category_title FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=?').bind(id).first();
   if(!p)return reply('المنتج غير موجود.',keyboard(adminBack));
   const rows=[];
-  for(const fields of [['title','description'],['price_iqd','stock'],['duration_months','usage_instructions'],['delivery_shared_text','delivery_instructions']])
+  for(const fields of [['title','description'],['title_en','description_en'],['price_iqd','stock'],['duration_months','usage_instructions'],['usage_instructions_en'],['delivery_shared_text','delivery_instructions']])
     rows.push(fields.map(f=>button(PRODUCT_FIELDS[f].label,`admin_product_field:${id}:${f}`)));
+  rows.push([button('✨ رمز متحرك خاص بهذا المنتج',`admin_product_icon:${id}`,'primary')]);
   rows.push([button('📷 إضافة/تغيير صورة المنتج',`admin_product_photo:${id}`,'primary'),button('🗑️ حذف الصورة',`admin_product_photo_delete:${id}`,'danger')]);
   rows.push([button('📦 تسليم محتوى ثابت',`admin_product_mode:${id}:shared`,'success'),button('🔑 تسليم كود فريد',`admin_product_mode:${id}:unique`,'primary')]);
   rows.push([button('➕ إضافة أكواد (كود في كل سطر)',`admin_product_code:${id}`,'success'),button('⏸️ إيقاف الشراء التلقائي',`admin_product_mode:${id}:disabled`,'danger')]);
@@ -107,7 +147,7 @@ async function productDetail(db,env,uid,id,messageId=null){
              button(p.featured?'⭐ إلغاء التمييز':'🌟 تمييز المنتج',`admin_product_toggle:${id}:featured`)]);
   rows.push(backTo('admin_products:0'),adminBack);
   const codes=await db.prepare('SELECT COUNT(*) n FROM product_delivery_items WHERE product_id=? AND used_by_purchase_id IS NULL').bind(id).first();
-  return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 سعر المحفظة: ${p.price_iqd?formatIQD(p.price_iqd):'لم يحدد'}\n📷 الصورة: ${p.photo_file_id?'✅ محفوظة':'—'}\n📖 طريقة الاستخدام: ${short(p.usage_instructions||'لم تضف',100)}\n📦 طريقة التسليم: ${p.fulfillment_mode}\n🔑 أكواد غير مستخدمة: ${codes?.n||0}\n📦 المحتوى الثابت: ${p.delivery_shared_text?'✅ محفوظ':'—'}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
+  return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 سعر المحفظة: ${p.price_iqd?formatIQD(p.price_iqd):'لم يحدد'}\n📷 الصورة: ${p.photo_file_id?'✅ محفوظة':'—'}\n✨ رمز المنتج: ${p.custom_emoji_id?'✅ مخصص':'الرمز العام'}\n📖 طريقة الاستخدام: ${short(p.usage_instructions||'لم تضف',100)}\n🇬🇧 English product name: ${short(p.title_en||'—',100)}\n📦 طريقة التسليم: ${p.fulfillment_mode}\n🔑 أكواد غير مستخدمة: ${codes?.n||0}\n📦 المحتوى الثابت: ${p.delivery_shared_text?'✅ محفوظ':'—'}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
 }
 async function categories(db,env,uid,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
@@ -122,6 +162,7 @@ async function categoryDetail(db,env,uid,id,messageId=null){
   if(!c)return reply('القسم غير موجود.',keyboard(adminBack));
   return reply(`📂 القسم #${c.id}\n\n${c.emoji} ${c.title}\nالحالة: ${c.active?'ظاهر':'مخفي'}`,keyboard(
     [button('✏️ تعديل الاسم',`admin_category_field:${id}:title`),button('🎨 تغيير الرمز',`admin_category_field:${id}:emoji`)],
+    [button('🇬🇧 English category name',`admin_category_field:${id}:title_en`)],
     [button(c.active?'🚫 إخفاء':'✅ إظهار',`admin_category_toggle:${id}`,c.active?'danger':'success')],backTo('admin_manage_categories'),adminBack));
 }
 async function userLookup(db,env,uid,input,messageId=null){
@@ -239,12 +280,43 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     [button('🖼️ تعريف البوت قبل ابدأ','admin_bot_intro','primary')],
     [button('👥 عداد المستخدمين','admin_counter','primary')],
     [button('👋 تعديل رسالة الترحيب','admin_setting:home_template','primary')],
+    [button('👋 English welcome message','admin_setting:home_template_en','primary')],
+    [button('🎨 تخصيص جميع أزرار الرئيسية','admin_home_buttons:0','success')],
+    [button('🛍️ رموز المنتج والسعر والمخزون','admin_product_icons','success')],
     [button('↩️ إعادة رسالة الترحيب الأصلية','admin_visual_reset','danger')],
     [button('👁️ معاينة الرئيسية بالبيانات الحقيقية','admin_visual_preview','success')],
     [button('✨ رمز الرئيسية','admin_setting:home_custom_emoji_id','primary'),button('✨ رمز المتجر','admin_setting:shop_custom_emoji_id','primary')],
     [button('✨ رمز الملف','admin_setting:profile_custom_emoji_id','primary'),button('✨ رمز المحفظة','admin_setting:wallet_custom_emoji_id','primary')],
     [button('✨ رمز الطلبات','admin_setting:orders_custom_emoji_id','primary'),button('✨ رمز الدعم','admin_setting:support_custom_emoji_id','primary')],
     [button('🛡️ لوحة المدير','admin','primary')]),messageId);
+  else if(data==='admin_home_buttons'||data.startsWith('admin_home_buttons:')){
+    const page=Math.min(1,Number(data.split(':')[1]||0)||0);
+    await homeButtonList(db,env,uid,page,messageId);
+  }
+  else if(data.startsWith('admin_home_button:'))await homeButtonDetail(db,env,uid,data.split(':')[1],messageId);
+  else if(data==='admin_product_icons')await productIconsMenu(db,env,uid,messageId);
+  else if(data.startsWith('admin_home_button_reset:')){
+    const key=data.split(':')[1];
+    if(!HOME_BUTTONS.some(b=>b.id===key))return true;
+    await Promise.all(['label_ar','label_en','icon'].map(field=>updateSetting(db,homeSettingKey(key,field),'',uid)));
+    await audit(db,uid,'reset_home_button','ui',0);
+    await homeButtonDetail(db,env,uid,key,messageId);
+  }
+  else if(data==='admin_home_reset_all'){
+    await setSession(db,uid,'owner_home_buttons_reset');
+    await sendOrEditText(env,uid,'⚠️ إعادة أسماء ورموز جميع أزرار الرئيسية إلى قيمها الأصلية؟ لا تمس العملية الترحيب ولا الطلبات ولا الأرصدة.',keyboard(
+      [button('✅ تأكيد الاستعادة','admin_home_reset_all_confirm','danger')],
+      [button('❌ إلغاء','admin_home_buttons:0')]),messageId);
+  }
+  else if(data==='admin_home_reset_all_confirm'){
+    const session=await getSession(db,uid);
+    if(session?.action!=='owner_home_buttons_reset')return true;
+    for(const b of HOME_BUTTONS)for(const field of ['label_ar','label_en','icon'])
+      await updateSetting(db,homeSettingKey(b.id,field),'',uid);
+    await clearSession(db,uid);
+    await audit(db,uid,'reset_all_home_buttons','ui',0);
+    await homeButtonList(db,env,uid,0,messageId);
+  }
   else if(data==='admin_visual_preview')await customerHomePreview(db,env,uid,messageId);
   else if(data==='admin_visual_reset') {
     await setSession(db,uid,'owner_home_reset');
@@ -278,7 +350,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await topupSetup(db,env,uid,messageId);
   }
   else if(data==='admin_stats')await stats(db,env,uid,messageId);
-  else if(data.startsWith('admin_settings'))await settings(db,env,uid,Math.min(10,positiveInt(data.split(':')[1])??0),messageId);
+  else if(data.startsWith('admin_settings'))await settings(db,env,uid,Math.min(20,positiveInt(data.split(':')[1])??0),messageId);
   else if(data==='admin_toggle_support_direct'){
     const current=await getSetting(db,'support_direct_enabled','false');
     await updateSetting(db,'support_direct_enabled',current==='true'?'false':'true',uid);
@@ -315,6 +387,11 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_setting:'))await settingDetail(db,env,uid,data.substring('admin_setting:'.length),messageId);
   else if(data.startsWith('admin_products'))await products(db,env,uid,Math.min(100,positiveInt(data.split(':')[1])??0),messageId);
   else if(data.startsWith('admin_product:'))await productDetail(db,env,uid,Number(data.split(':')[1]),messageId);
+  else if(data.startsWith('admin_product_icon:')){
+    const id=positiveInt(data.split(':')[1]);if(!id)return true;
+    await setSession(db,uid,'owner_product_icon',{id});
+    await sendText(env,uid,'✨ أرسل إيموجي متحرك خاص بهذا المنتج، أو رقم custom_emoji_id.\nلإزالة الرمز الخاص والعودة للرمز العام أرسل /empty. للإلغاء /cancel.');
+  }
   else if(data.startsWith('admin_product_photo:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
     await setSession(db,uid,'owner_product_photo',{id});
@@ -373,9 +450,9 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_category:'))await categoryDetail(db,env,uid,Number(data.split(':')[1]),messageId);
   else if(data.startsWith('admin_category_field:')){
     const [, id,field]=data.split(':');
-    if(!['title','emoji'].includes(field)||!positiveInt(id))return true;
+    if(!['title','title_en','emoji'].includes(field)||!positiveInt(id))return true;
     await setSession(db,uid,'owner_category_field',{id:Number(id),field});
-    await sendText(env,uid,`✏️ أرسل ${field==='title'?'اسم القسم الجديد':'الرمز التعبيري'} للقسم #${id}. للإلغاء /cancel.`);
+    await sendText(env,uid,`✏️ أرسل ${field==='title'?'اسم القسم الجديد':field==='title_en'?'الاسم الإنجليزي للقسم':'الرمز التعبيري'} للقسم #${id}. للإلغاء /cancel. لمسح الاسم الإنجليزي أرسل /empty.`);
   }
   else if(data.startsWith('admin_category_toggle:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
@@ -466,7 +543,7 @@ export async function handleAdminText(db,env,uid,session,message){
   if(session.action==='owner_setting'){
     const {key}=session.payload||{};
     const receivedCustom=(message.entities||message.caption_entities||[]).find(e=>e.type==='custom_emoji'&&e.custom_emoji_id)?.custom_emoji_id;
-    const raw=key==='home_template' ? preserveCustomEmojiInTemplate(text,message.entities||[])
+    const raw=['home_template','home_template_en'].includes(key) ? preserveCustomEmojiInTemplate(text,message.entities||[])
       : SETTING_FIELDS[key]?.customEmoji && receivedCustom ? String(receivedCustom) : text;
     const valid=validateSetting(key,raw==='/empty'?'':raw);
     if(!valid.ok){await sendText(env,uid,'❌ '+valid.reason);return true;}
@@ -487,9 +564,20 @@ export async function handleAdminText(db,env,uid,session,message){
       [button('⚙️ جميع الإعدادات','admin_settings:0','primary')],adminBack));
     return true;
   }
+  if(session.action==='owner_product_icon'){
+    const id=Number(session.payload?.id);
+    const found=(message.entities||message.caption_entities||[]).find(e=>e.type==='custom_emoji'&&/^\d{10,30}$/.test(String(e.custom_emoji_id)))?.custom_emoji_id;
+    const value=text==='/empty'?'':found||text;
+    if(value&&!/^\d{10,30}$/.test(value)){await sendText(env,uid,'❌ أرسل رمزاً متحركاً حقيقياً أو رقم custom_emoji_id، أو /empty.');return true;}
+    await db.prepare('UPDATE products SET custom_emoji_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(value||null,id).run();
+    await clearSession(db,uid);
+    await audit(db,uid,'set_product_emoji','product',id);
+    await sendText(env,uid,'✅ تم حفظ رمز المنتج.',keyboard([button('📦 تفاصيل المنتج',`admin_product:${id}`)],adminBack));
+    return true;
+  }
   if(session.action==='owner_product_field'){
     const {id,field}=session.payload||{};
-    const valid=validatedProductValue(field,text);
+    const valid=validatedProductValue(field,text==='/empty'&&field.endsWith('_en')?'':text);
     if(!valid.ok){await sendText(env,uid,'❌ '+valid.message);return true;}
     const res=await db.prepare(`UPDATE products SET ${field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(valid.value,id).run();
     await clearSession(db,uid);
@@ -499,9 +587,9 @@ export async function handleAdminText(db,env,uid,session,message){
   }
   if(session.action==='owner_category_field'){
     const {id,field}=session.payload||{};
-    const limit=field==='title'?70:8;
-    if(!['title','emoji'].includes(field)||!text||text.length>limit){await sendText(env,uid,`أدخل قيمة لا تتجاوز ${limit} أحرف.`);return true;}
-    const res=await db.prepare(`UPDATE categories SET ${field}=? WHERE id=?`).bind(text,id).run();
+    const limit=field==='title'||field==='title_en'?70:8;
+    if(!['title','title_en','emoji'].includes(field)||(!text&&field!=='title_en')||text.length>limit){await sendText(env,uid,`أدخل قيمة لا تتجاوز ${limit} أحرف.`);return true;}
+    const res=await db.prepare(`UPDATE categories SET ${field}=? WHERE id=?`).bind(text==='/empty'&&field==='title_en'?null:text,id).run();
     await clearSession(db,uid);
     if(res.meta?.changes)await audit(db,uid,'edit_'+field,'category',id);
     await sendText(env,uid,res.meta?.changes?'✅ تم تحديث القسم.':'القسم غير موجود.',keyboard([button('📂 عرض القسم',`admin_category:${id}`)],adminBack));

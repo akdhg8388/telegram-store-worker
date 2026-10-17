@@ -163,3 +163,14 @@ V12 يعرض تجريبياً الشراء من رصيد المحفظة المس
 - تحسين السرعة: إجابة الضغط على الزر تعمل بالتوازي مع المعالجة، وفحص جاهزية منتجات الصفحة بالتوازي، وقراءة العملة وسعر الصرف مرة واحدة لكل صفحة، وحذف رسائل العرض بعمليات متوازية محدودة مع تعديل الصفحة فوراً.
 - تُطبّق ترحيلات D1 في `migrations/0010_purchase_views_and_unique_codes.sql` أثناء النشر. لا تُنشر هذه النسخة تلقائياً بمجرد تحديث GitHub.
 - تذكير: بيع المنتجات والخدمات الرقمية داخل بوت Telegram له متطلبات دفع خاصة بالمنصة؛ يجب مراجعة التوافق قبل الاستخدام الإنتاجي.
+
+
+## V14 — Animated buttons, bilingual store and improved performance
+
+- From /admin → Customize Store Interface → Customize All Home Buttons, the owner can edit each Home button's Arabic and English names and its custom animated emoji icon, individually or reset them to defaults. All callback actions and permissions remain unchanged.
+- Home button icons use Telegram Bot API's `icon_custom_emoji_id` and gracefully fall back to ordinary buttons if unavailable. Existing page header emoji settings remain compatible.
+- Product, price and stock animated icons are editable globally; each product may override the product icon. Telegram supports one animated icon per inline button; separate product, price and stock animations appear in the product-detail message.
+- The language selector saves Arabic or English per user in D1 and updates the native Telegram command menu for that chat. An independent English welcome template and editable English product/category name, product description and usage instructions are provided. Owner-supplied Arabic descriptions and unique delivery credentials are not automatically altered or discarded.
+- D1 migration `0011_product_visuals.sql` adds only optional fields and English names for built-in categories. No customer balance, order, inventory item or previous purchase is deleted or rewritten.
+- Home button settings are retrieved in one query, and product-detail queries use concurrent reads for faster navigation. Exact end-user performance should be confirmed after deployment.
+- The in-Telegram wallet payment route for digital goods may violate Telegram Stars rules; review compliance before public sales.

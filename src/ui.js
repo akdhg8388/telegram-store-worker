@@ -2,50 +2,54 @@ import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMeth
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
 import {sendOrEditText} from './telegram.js';
 import {getSetting,storeAcceptsOrders} from './settings.js';
-import {DEFAULT_HOME_TEMPLATE,renderHomeTemplate,decimalMoney,decoratedMessage,decoratedHome} from './presentation.js';
-import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage} from './wallet.js';
+import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,renderHomeTemplate,decimalMoney,decoratedMessage,decoratedHome,decorateProductText} from './presentation.js';
+import {loadVisualSettings,homeActionButton,homeUrlButton,withButtonIcon,emojiId} from './home-buttons.js';
+import {languageOf,choice,translateUi} from './i18n.js';
+import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage,validRate} from './wallet.js';
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 
 export async function home(db,env,uid,messageId=null) {
-  const user = await getUser(db,uid);
-  const featured=(await db.prepare('SELECT id,title,price_iqd FROM products WHERE active=1 AND featured=1 AND price_iqd IS NOT NULL ORDER BY id DESC LIMIT 2').all()).results??[];
-  const rows=[];
-  for(const p of featured)rows.push([button(`🌟 ${short(p.title,25)} — ${await priceDisplay(db,uid,p.price_iqd)}`,`product:${p.id}`,'success')]);
-  rows.push([button('🛍️ المتجر','categories','success'),button('💎 المنتجات المميزة','featured','success')]);
-  rows.push([button('💳 محفظتي','wallet','success'),button('👤 ملفي الشخصي','profile','success')]);
-  rows.push([button('💱 تغيير العملة 🇮🇶/🇺🇸','currency','primary')]);
-  rows.push([button('📦 طلباتي','orders'),button('📜 سجل العمليات','transactions')]);
-  rows.push([button('👥 الإحالات','referrals'),button('🌐 اللغة','language')]);
-  rows.push([button('🎧 الدعم','support'),button('📢 الأخبار','news')]);
-  if(isAdmin(env,uid)) rows.push([button('🛡️ لوحة تحكم المدير','admin','primary')]);
-  if (env.RESELLER_URL?.startsWith('https://')) rows.push([urlButton('🔑 API Reseller',env.RESELLER_URL)]);
-  const [name,template,instructions,count,rate]=await Promise.all([
-    getSetting(db,'store_name',env.STORE_NAME||'My Store'),
-    getSetting(db,'home_template',DEFAULT_HOME_TEMPLATE),
-    getSetting(db,'storefront_instructions',''),
-    db.prepare('SELECT COUNT(*) AS n FROM users').first(),
-    usdRate(db)
+  const lang=languageOf(env);
+  // Fetch button configurations and welcome settings together. This replaces
+  // repeated per-button D1 queries and retains the owner's saved overrides.
+  const [user,featuredRow,visual,count]=await Promise.all([
+    getUser(db,uid),
+    db.prepare('SELECT * FROM products WHERE active=1 AND featured=1 AND price_iqd IS NOT NULL ORDER BY id DESC LIMIT 2').all(),
+    loadVisualSettings(db),
+    db.prepare('SELECT COUNT(*) AS n FROM users').first()
   ]);
-  const storedAdjustment=await getSetting(db,'users_display_adjustment','0');
-  const adjustment=/^-?\d+$/.test(storedAdjustment) ? Number(storedAdjustment) : 0;
+  const featured=featuredRow.results??[];
+  const rate=validRate(visual.usd_rate_iqd);
+  const display=amount=>user?.currency_preference==='USD'&&rate
+    ?formatUSD(Math.round(Number(amount)*100/rate)):formatIQD(amount);
+  const rows=[];
+  for(const p of featured)rows.push([withButtonIcon(button(`🌟 ${short(lang==='en'&&p.title_en||p.title,25)} — ${display(p.price_iqd)}`,`product:${p.id}`,'success'),p.custom_emoji_id||visual.product_custom_emoji_id)]);
+  rows.push([homeActionButton(visual,'shop',lang,'success'),homeActionButton(visual,'featured',lang,'success')]);
+  rows.push([homeActionButton(visual,'wallet',lang,'success'),homeActionButton(visual,'profile',lang,'success')]);
+  rows.push([homeActionButton(visual,'currency',lang,'primary')]);
+  rows.push([homeActionButton(visual,'orders',lang),homeActionButton(visual,'transactions',lang)]);
+  rows.push([homeActionButton(visual,'referrals',lang),homeActionButton(visual,'language',lang)]);
+  rows.push([homeActionButton(visual,'support',lang),homeActionButton(visual,'news',lang)]);
+  if(isAdmin(env,uid))rows.push([homeActionButton(visual,'admin',lang,'primary')]);
+  if(env.RESELLER_URL?.startsWith('https://'))rows.push([homeUrlButton(visual,'reseller',env.RESELLER_URL,lang)]);
+  const adjustment=/^-?\d+$/.test(visual.users_display_adjustment||'0') ? Number(visual.users_display_adjustment||0):0;
   const shownUsers=Math.max(0,Number(count?.n||0)+adjustment);
   const balance=Number(user?.wallet_balance_iqd||0);
   const values={
-    store:short(name,80),name:short(user?.first_name||'مستخدم',120),
+    store:short(visual.store_name||env.STORE_NAME||'My Store',80),name:short(user?.first_name||choice(env,'مستخدم','User'),120),
     id:String(uid),users:shownUsers.toLocaleString('en-US'),
-    balance:user?.currency_preference==='USD' ? (rate?'$'+decimalMoney(balance/rate):'$—') : 'IQD '+Number(balance).toLocaleString('en-US'),
-    balance_iqd:decimalMoney(balance),
-    balance_usd:rate?decimalMoney(balance/rate):'غير محدد',
-    instructions:short(instructions,1200)
+    balance:user?.currency_preference==='USD'?(rate?'$'+decimalMoney(balance/rate):'$—'):'IQD '+Number(balance).toLocaleString('en-US'),
+    balance_iqd:decimalMoney(balance),balance_usd:rate?decimalMoney(balance/rate):choice(env,'غير محدد','Not configured'),
+    instructions:short(visual.storefront_instructions||'',1200)
   };
-  const text=renderHomeTemplate(template,values);
-  const decorated=await decoratedHome(db,text);
-  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
+  const template=lang==='en'?(visual.home_template_en||DEFAULT_HOME_TEMPLATE_EN):(visual.home_template||DEFAULT_HOME_TEMPLATE);
+  const decorated=await decoratedHome(db,renderHomeTemplate(template,values),visual.home_custom_emoji_id||'');
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,{...decorated.options,preserveText:lang==='en'});
 }
 export async function categories(db,env,uid,messageId=null) {
   const cats=await listCategories(db);
   const rows=[];
-  for(let i=0;i<cats.length;i+=3) rows.push(cats.slice(i,i+3).map(c=>button(`${c.emoji} ${short(c.title,16)}`,`category:${c.id}:0`,'primary')));
+  for(let i=0;i<cats.length;i+=3) rows.push(cats.slice(i,i+3).map(c=>button(`${c.emoji} ${short(languageOf(env)==='en'&&c.title_en||c.title,16)}`,`category:${c.id}:0`,'primary')));
   rows.push([button('🔎 البحث','search','primary'),button('🛍️ جميع المنتجات','products:0','success')]);
   rows.push(backRow());
   const decorated=await decoratedMessage(db,'shop','🛍️ أقسام المتجر\n\nاختر القسم الذي تريده:');
@@ -59,11 +63,11 @@ export async function products(db,env,uid,page=0,categoryId=null,query=null,feat
   // Read currency/rate once per page; independent inventory checks run concurrently.
   const currency=await getUser(db,uid);
   const rate=currency?.currency_preference==='USD'?await usdRate(db):null;
-  const statuses=await Promise.all(records.map(p=>purchaseAvailability(db,p)));
+  const [statuses,visual]=await Promise.all([Promise.all(records.map(p=>purchaseAvailability(db,p))),loadVisualSettings(db)]);
   records.forEach((p,index)=>{
     const available=statuses[index];
-    const value=p.price_iqd?(rate?formatUSD(Math.round(p.price_iqd*100/rate)):formatIQD(p.price_iqd)):'غير مسعّر';
-    rows.push([button(`${available.ready?'🟢':'🔴'} ${short(p.title,29)} — ${value} • ${available.ready?(available.count??'متوفر'):'غير متاح'}`,`product:${p.id}`,available.ready?'success':'danger')]);
+    const value=p.price_iqd?(rate?formatUSD(Math.round(p.price_iqd*100/rate)):formatIQD(p.price_iqd)):choice(env,'غير مسعّر','Not priced');
+    rows.push([withButtonIcon(button(`${available.ready?'🟢':'🔴'} ${short(languageOf(env)==='en'&&p.title_en||p.title,29)} — ${value} • ${available.ready?(available.count??choice(env,'متوفر','Available')):choice(env,'غير متاح','Unavailable')}`,`product:${p.id}`,available.ready?'success':'danger'),p.custom_emoji_id||visual.product_custom_emoji_id)]);
   });
   if(!featuredOnly && !query){
     const pages=[];
@@ -78,19 +82,25 @@ export async function products(db,env,uid,page=0,categoryId=null,query=null,feat
 }
 export async function productView(db,env,uid,id,messageId=null){
   const p=await getProduct(db,id);
-  if(!p)return sendOrEditText(env,uid,'هذا المنتج غير متوفر حالياً.',keyboard([button('🛍️ المتجر','categories')],backRow()),messageId);
-  const fav=await db.prepare('SELECT 1 AS yes FROM favorites WHERE user_tg_id=? AND product_id=?').bind(uid,id).first();
-  const desc=short(p.description||'لا يوجد وصف إضافي.',1300);
-  const purchaseInstructions=await getSetting(db,'purchase_instructions','');
-  const status=await purchaseAvailability(db,p);
-  const stockText=status.ready?`🟢 متوفر • المخزون الجاهز: ${status.count??'متاح'}`:`🔴 غير متوفر • ${status.reason}`;
-  const shown=p.price_iqd?await priceDisplay(db,uid,p.price_iqd):'لم يحدد';
-  const text=`🛍️ ${short(p.title,150)}\n\n${desc}\n\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب تفاصيل الخدمة'}\n💰 السعر: ${shown}\n📦 ${stockText}\n\n${status.ready?'✅ يتم التسليم تلقائياً بعد الشراء من المحفظة.':'⛔ لا يمكن الشراء حتى يجهّز المدير بيانات التسليم.'}${purchaseInstructions?'\n\n'+short(purchaseInstructions,700):''}`;
-  return sendOrEditText(env,uid,text,keyboard(
-    [button(stockText,`product:${id}`,status.ready?'success':'danger')],
-    status.ready?[button('🛒 شراء فوري من المحفظة',`buy:${id}`,'success')]:[],
+  if(!p)return sendOrEditText(env,uid,choice(env,'هذا المنتج غير متوفر حالياً.','This product is currently unavailable.'),keyboard([button('🛍️ المتجر','categories')],backRow()),messageId);
+  const [fav,visual,user,status]=await Promise.all([
+    db.prepare('SELECT 1 AS yes FROM favorites WHERE user_tg_id=? AND product_id=?').bind(uid,id).first(),
+    loadVisualSettings(db),getUser(db,uid),purchaseAvailability(db,p)
+  ]);
+  const desc=short((languageOf(env)==='en'&&p.description_en)||p.description||choice(env,'لا يوجد وصف إضافي.','No additional description.'),1300);
+  const icon=p.custom_emoji_id||visual.product_custom_emoji_id;
+  const stockText=status.ready?`🟢 ${choice(env,'متوفر • المخزون الجاهز:','Available • Ready stock:')} ${status.count??choice(env,'متاح','Available')}`:`🔴 ${choice(env,'غير متوفر •','Unavailable •')} ${languageOf(env)==='en'?translateUi(status.reason,'en'):status.reason}`;
+  const rate=validRate(visual.usd_rate_iqd);
+  const shown=p.price_iqd?(user?.currency_preference==='USD'&&rate?formatUSD(Math.round(p.price_iqd*100/rate)):formatIQD(p.price_iqd)):choice(env,'لم يحدد','Not specified');
+  const text=languageOf(env)==='en'
+    ?`🛍️ ${short(languageOf(env)==='en'&&p.title_en||p.title,150)}\n\n${desc}\n\n⏳ Duration: ${p.duration_months?p.duration_months+' month(s)':'As specified for the service'}\n💰 Price: ${shown}\n📦 ${stockText}\n\n${status.ready?'✅ Instant delivery after wallet payment.':'⛔ Purchasing is disabled until the owner configures delivery.'}${visual.purchase_instructions?'\n\n'+short(visual.purchase_instructions,700):''}`
+    :`🛍️ ${short(languageOf(env)==='en'&&p.title_en||p.title,150)}\n\n${desc}\n\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب تفاصيل الخدمة'}\n💰 السعر: ${shown}\n📦 ${stockText}\n\n${status.ready?'✅ يتم التسليم تلقائياً بعد الشراء من المحفظة.':'⛔ لا يمكن الشراء حتى يجهّز المدير بيانات التسليم.'}${visual.purchase_instructions?'\n\n'+short(visual.purchase_instructions,700):''}`;
+  const decorated=decorateProductText(text,{product:emojiId(icon),price:emojiId(visual.price_custom_emoji_id),stock:emojiId(visual.stock_custom_emoji_id)});
+  return sendOrEditText(env,uid,decorated.text,keyboard(
+    [withButtonIcon(button(stockText,`product:${id}`,status.ready?'success':'danger'),visual.stock_custom_emoji_id)],
+    status.ready?[withButtonIcon(button('🛒 شراء فوري من المحفظة',`buy:${id}`,'success'),icon)]:[],
     [button(fav?'💔 إزالة من المفضلة':'💗 إضافة للمفضلة',`favorite:${id}`,'primary')],
-    [button('🔄 تحديث المخزون',`product:${id}`,'primary'),button('🛍️ الأقسام','categories','primary')],backRow()),messageId);
+    [button('🔄 تحديث المخزون',`product:${id}`,'primary'),button('🛍️ الأقسام','categories','primary')],backRow()),messageId,{...decorated.options,preserveText:languageOf(env)==='en'});
 }
 export async function walletSummary(db,uid){
   const u=await getUser(db,uid);
@@ -155,7 +165,11 @@ export async function orders(db,env,uid,messageId=null){
 }
 export async function favorites(db,env,uid,messageId=null){
   const items=(await db.prepare('SELECT p.id,p.title,p.price_iqd FROM favorites f JOIN products p ON p.id=f.product_id WHERE f.user_tg_id=? AND p.active=1 ORDER BY p.id DESC LIMIT 20').bind(uid).all()).results??[];
-  const rows=[];for(const item of items)rows.push([button(`${short(item.title,35)} — ${item.price_iqd?await priceDisplay(db,uid,item.price_iqd):'غير مسعر'}`,`product:${item.id}`)]);
+  const [user,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
+  const rows=[];for(const item of items){
+    const value=item.price_iqd?(user?.currency_preference==='USD'&&rate?formatUSD(Math.round(item.price_iqd*100/rate)):formatIQD(item.price_iqd)):'غير مسعر';
+    rows.push([button(`${short(item.title,35)} — ${value}`,`product:${item.id}`)]);
+  }
   return sendOrEditText(env,uid,items.length?'💗 المفضلة — منتجاتك المحفوظة:':'💗 المفضلة\n\nليس لديك منتجات مفضلة.',keyboard(...rows,backRow()),messageId);
 }
 export async function topupPresets(db,env,uid,messageId=null){

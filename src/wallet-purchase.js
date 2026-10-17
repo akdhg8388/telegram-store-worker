@@ -1,3 +1,4 @@
+import {languageOf,choice} from './i18n.js';
 import {button,keyboard,backRow,formatIQD,short} from './common.js';
 import {getUser,getProduct,getSession,setSession,clearSession} from './database.js';
 import {usdRate,formatUSD,baghdadDate} from './wallet.js';
@@ -32,17 +33,21 @@ export async function priceDisplay(db,uid,price){
 export async function beginPurchase(db,env,uid,p,nonceFactory=()=>crypto.randomUUID()){
   const status=await purchaseAvailability(db,p);
   if(!status.ready)return sendText(env,uid,'⛔ '+status.reason);
-  const u=await getUser(db,uid);
+  const [u,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
   const amount=Number(p.price_iqd),balance=Number(u?.wallet_balance_iqd||0);
-  const shownPrice=await priceDisplay(db,uid,amount);
-  const shownBalance=await priceDisplay(db,uid,balance);
-  if(balance<amount)return sendText(env,uid,
-    `💳 رصيد المحفظة غير كافٍ.\n\n🛍️ ${short(p.title,100)}\n💰 السعر: ${shownPrice}\n👛 رصيدك الحالي: ${shownBalance}\n📉 الناقص: ${await priceDisplay(db,uid,amount-balance)}\n\nيرجى شحن محفظتك للمتابعة.`,keyboard([button('➕ شحن المحفظة','topup','success')],[button('💳 محفظتي','wallet')],backRow()));
+  const price=value=>u?.currency_preference==='USD'&&rate?formatUSD(Math.round(value*100/rate)):formatIQD(value);
+  const title=short(languageOf(env)==='en'&&p.title_en||p.title,100);
+  if(balance<amount)return sendText(env,uid,languageOf(env)==='en'
+    ?`💳 Insufficient wallet balance.\n\n🛍️ ${title}\n💰 Price: ${price(amount)}\n👛 Your balance: ${price(balance)}\n📉 Amount needed: ${price(amount-balance)}\n\nPlease top up your wallet to continue.`
+    :`💳 رصيد المحفظة غير كافٍ.\n\n🛍️ ${title}\n💰 السعر: ${price(amount)}\n👛 رصيدك الحالي: ${price(balance)}\n📉 الناقص: ${price(amount-balance)}\n\nيرجى شحن محفظتك للمتابعة.`,keyboard([button('➕ شحن المحفظة','topup','success')],[button('💳 محفظتي','wallet')],backRow()),{preserveText:languageOf(env)==='en'});
   const nonce=nonceFactory();
   await setSession(db,uid,'wallet_purchase_confirm',{productId:p.id,nonce});
-  const confirmation=await sendText(env,uid,`🛒 تأكيد الشراء من المحفظة\n\n📦 المنتج: ${short(p.title,100)}\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب المنتج'}\n💰 السعر: ${shownPrice}\n👛 رصيدك: ${shownBalance}\n\n✅ سيتم خصم المبلغ مرة واحدة وتسليم المحتوى المتاح فوراً.`,keyboard(
+  const details=languageOf(env)==='en'
+    ?`🛒 Confirm Wallet Purchase\n\n📦 Product: ${title}\n⏳ Duration: ${p.duration_months?p.duration_months+' month(s)':'As specified for this product'}\n💰 Price: ${price(amount)}\n👛 Your balance: ${price(balance)}\n\n✅ Your wallet will be charged once, and the item will be delivered immediately.`
+    :`🛒 تأكيد الشراء من المحفظة\n\n📦 المنتج: ${title}\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب المنتج'}\n💰 السعر: ${price(amount)}\n👛 رصيدك: ${price(balance)}\n\n✅ سيتم خصم المبلغ مرة واحدة وتسليم المحتوى المتاح فوراً.`;
+  const confirmation=await sendText(env,uid,details,keyboard(
     [button('✅ تأكيد الشراء الفوري',`wallet_confirm:${nonce}`,'success')],
-    [button('↩️ رجوع للمنتج',`product:${p.id}`,'danger')]));
+    [button('↩️ رجوع للمنتج',`product:${p.id}`,'danger')]),{preserveText:languageOf(env)==='en'});
   await trackPurchaseView(db,uid,confirmation);
   return confirmation;
 }
@@ -93,26 +98,34 @@ export async function commitPurchase(db,env,uid,nonce){
   }
 }
 export async function showReceipt(db,env,uid,id){
-  const sale=await db.prepare('SELECT * FROM wallet_purchases WHERE id=? AND user_tg_id=?').bind(id,uid).first();
+  const sale=await db.prepare(`SELECT w.*,p.title_en AS current_title_en,p.description_en AS current_description_en,
+      p.usage_instructions_en AS current_usage_en
+    FROM wallet_purchases w LEFT JOIN products p ON p.id=w.product_id WHERE w.id=? AND w.user_tg_id=?`).bind(id,uid).first();
   if(!sale)return sendText(env,uid,'لا توجد عملية شراء بهذا الرقم لحسابك.');
-  const current=await getUser(db,uid);
-  const amount=await priceDisplay(db,uid,sale.price_iqd);
-  const balance=await priceDisplay(db,uid,Number(current?.wallet_balance_iqd||0));
-  const text=`✅ تم الشراء والتسليم بنجاح!\n\n🧾 العملية: #${sale.id}\n🛍️ المنتج: ${short(sale.product_name,150)}\n📝 التفاصيل: ${short(sale.product_description||'—',650)}\n⏳ المدة: ${sale.duration_months?sale.duration_months+' شهر':'حسب المنتج'}\n💰 المبلغ المخصوم: ${amount}\n💳 رصيدك المتبقي: ${balance}\n📅 التاريخ والوقت: ${baghdadDate(sale.created_at)}\n\n📦 بيانات المنتج المستلم:\n${short(sale.delivery_payload,1400)}\n\n📖 طريقة الاستخدام:\n${short(sale.usage_instructions||'لم يضف المدير تعليمات إضافية.',900)}`;
+  const [current,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
+  const format=value=>current?.currency_preference==='USD'&&rate?formatUSD(Math.round(Number(value)*100/rate)):formatIQD(value);
+  const english=languageOf(env)==='en';
+  const name=short(english&&sale.current_title_en||sale.product_name,150);
+  const details=short(english&&sale.current_description_en||sale.product_description||'—',650);
+  const usage=short(english&&sale.current_usage_en||sale.usage_instructions||choice(env,'لم يضف المدير تعليمات إضافية.','No additional instructions provided.'),900);
+  const text=english
+   ?`✅ Purchase & delivery successful!\n\n🧾 Purchase: #${sale.id}\n🛍️ Product: ${name}\n📝 Details: ${details}\n⏳ Duration: ${sale.duration_months?sale.duration_months+' month(s)':'As specified for the item'}\n💰 Amount charged: ${format(sale.price_iqd)}\n💳 Remaining balance: ${format(current?.wallet_balance_iqd||0)}\n📅 Date & time: ${baghdadDate(sale.created_at,english?'en':'ar')}\n\n📦 Your delivered item:\n${short(sale.delivery_payload,1400)}\n\n📖 How to use:\n${usage}`
+   :`✅ تم الشراء والتسليم بنجاح!\n\n🧾 العملية: #${sale.id}\n🛍️ المنتج: ${name}\n📝 التفاصيل: ${details}\n⏳ المدة: ${sale.duration_months?sale.duration_months+' شهر':'حسب المنتج'}\n💰 المبلغ المخصوم: ${format(sale.price_iqd)}\n💳 رصيدك المتبقي: ${format(current?.wallet_balance_iqd||0)}\n📅 التاريخ والوقت: ${baghdadDate(sale.created_at,english?'en':'ar')}\n\n📦 بيانات المنتج المستلم:\n${short(sale.delivery_payload,1400)}\n\n📖 طريقة الاستخدام:\n${usage}`;
   const markup=keyboard([button('📦 مشترياتي','wallet_purchases','success')],[button('🏠 الرئيسية','home','primary')]);
-  // The receipt is saved BEFORE sending. A transient Telegram error never loses
-  // the purchased content; the customer can reopen it under My Purchases.
-  try {const msg=await sendText(env,uid,text,markup);await trackPurchaseView(db,uid,msg);}catch(e){console.error('Wallet receipt Telegram failure',String(e));}
+  try {const msg=await sendText(env,uid,text,markup,{preserveText:english});await trackPurchaseView(db,uid,msg);}catch(e){console.error('Wallet receipt Telegram failure',String(e));}
   if(sale.photo_file_id){
-    try {const msg=await telegram(env,'sendPhoto',{chat_id:uid,photo:sale.photo_file_id,caption:`🖼️ صورة ${short(sale.product_name,110)} — عملية #${sale.id}`});await trackPurchaseView(db,uid,msg);}
+    try {const msg=await telegram(env,'sendPhoto',{chat_id:uid,photo:sale.photo_file_id,caption:english?`🖼️ ${name} — Purchase #${sale.id}`:`🖼️ صورة ${name} — عملية #${sale.id}`,_preserve_text:english});await trackPurchaseView(db,uid,msg);}
     catch(e){console.error('Wallet receipt photo failure',String(e));}
   }
   return sale;
 }
 export async function purchaseList(db,env,uid,messageId=null){
   const {sendOrEditText}=await import('./telegram.js');
-  const rows=(await db.prepare('SELECT id,product_name,price_iqd,created_at FROM wallet_purchases WHERE user_tg_id=? ORDER BY id DESC LIMIT 15').bind(uid).all()).results??[];
-  return sendOrEditText(env,uid,rows.length?'📦 مشترياتي من المحفظة\n\nاختر عملية لعرض تفاصيل المنتج والصورة وطريقة الاستخدام.':'📦 مشترياتي\n\nلم تشترِ منتجات من المحفظة بعد.',keyboard(
-    ...rows.map(p=>[button(`#${p.id} • ${short(p.product_name,32)}`,`wallet_receipt:${p.id}`,'primary')]),
-    backRow()),messageId);
+  const rows=(await db.prepare(`SELECT w.id,w.product_name,w.price_iqd,w.created_at,p.title_en FROM wallet_purchases w
+    LEFT JOIN products p ON p.id=w.product_id WHERE w.user_tg_id=? ORDER BY w.id DESC LIMIT 15`).bind(uid).all()).results??[];
+  return sendOrEditText(env,uid,languageOf(env)==='en'
+    ?(rows.length?'📦 My Wallet Purchases\n\nSelect a purchase to view its details, photo, and instructions.':'📦 My Purchases\n\nYou have not made any wallet purchases yet.')
+    :(rows.length?'📦 مشترياتي من المحفظة\n\nاختر عملية لعرض تفاصيل المنتج والصورة وطريقة الاستخدام.':'📦 مشترياتي\n\nلم تشترِ منتجات من المحفظة بعد.'),keyboard(
+    ...rows.map(p=>[button(`#${p.id} • ${short(languageOf(env)==='en'&&p.title_en||p.product_name,32)}`,`wallet_receipt:${p.id}`,'primary')]),
+    backRow()),messageId,{preserveText:languageOf(env)==='en'});
 }

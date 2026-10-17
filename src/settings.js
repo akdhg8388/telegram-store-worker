@@ -1,3 +1,4 @@
+import {homeButtonSettings} from './home-buttons.js';
 // The only values that an administrator may edit from Telegram. Secrets and identity are immutable here.
 export const SETTING_FIELDS=Object.freeze({
   store_name: {label:'🏪 اسم المتجر',max:80,required:true},
@@ -9,6 +10,7 @@ export const SETTING_FIELDS=Object.freeze({
   support_direct_label: {label:'👤 عنوان زر المسؤول',max:60},
   support_direct_enabled: {label:'👁️ إظهار زر تواصل المسؤول',max:5,toggle:true},
   home_template: {label:'👋 قالب رسالة الرئيسية (حقول حقيقية)',max:3200},
+  home_template_en: {label:'👋 English home message template',max:3200},
   welcome_text: {label:'👋 نص الترحيب السابق (للتوافق)',max:1500},
   home_custom_emoji_id: {label:'✨ الرمز المتحرك للرئيسية',max:30,customEmoji:true},
   shop_custom_emoji_id: {label:'✨ الرمز المتحرك للمتجر',max:30,customEmoji:true},
@@ -34,6 +36,7 @@ export const SETTING_FIELDS=Object.freeze({
   usd_rate_iqd: {label:'💱 سعر الدولار بالدينار العراقي (لكل 1 USD)',max:5,required:true,rate:true},
   manual_topups_enabled: {label:'💳 تشغيل طلبات شحن المحفظة',max:5,toggle:true},
   store_enabled: {label:'🔌 استقبال طلبات جديدة',max:5,toggle:true},
+  ...homeButtonSettings(),
 });
 
 export function validateSetting(key,input){

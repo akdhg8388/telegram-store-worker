@@ -7,7 +7,7 @@ import {handleAdminCallback,handleAdminText} from '../src/admin-controls.js';
 import {processUpdate} from '../src/bot.js';
 
 const root=new URL('../migrations/',import.meta.url);
-const migrations=['0001_init','0002_admin_controls','0003_reliability','0004_reference_catalog','0005_persistent_navigation','0006_wallet_checkout','0007_support_moderation_topup','0008_custom_ui_customer_inbox_cleanup','0009_wallet_auto_delivery','0010_purchase_views_and_unique_codes'];
+const migrations=['0001_init','0002_admin_controls','0003_reliability','0004_reference_catalog','0005_persistent_navigation','0006_wallet_checkout','0007_support_moderation_topup','0008_custom_ui_customer_inbox_cleanup','0009_wallet_auto_delivery','0010_purchase_views_and_unique_codes','0011_product_visuals'];
 function setup(){
  const c=new DatabaseSync(':memory:');
  for(const m of migrations)c.exec(readFileSync(new URL(`${m}.sql`,root),'utf8'));
