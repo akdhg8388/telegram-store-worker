@@ -69,7 +69,8 @@ jobs:
           set -euo pipefail
           printf '%s' "$TELEGRAM_BOT_TOKEN" | npx wrangler secret put TELEGRAM_BOT_TOKEN
           printf '%s' "$ADMIN_ID" | npx wrangler secret put ADMIN_ID
-          WEBHOOK_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"
+          # Stable per bot token: a failed deploy cannot repeatedly rotate the webhook secret.
+          WEBHOOK_SECRET="$(node -e "const c=require('node:crypto');process.stdout.write(c.createHmac('sha256',process.env.TELEGRAM_BOT_TOKEN).update('my-store-telegram-webhook:v1').digest('hex'))")"
           echo "::add-mask::$WEBHOOK_SECRET"
           printf '%s' "$WEBHOOK_SECRET" | npx wrangler secret put WEBHOOK_SECRET
           export WEBHOOK_SECRET

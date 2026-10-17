@@ -1,4 +1,5 @@
 import {CUSTOMER_COMMANDS,OWNER_COMMANDS} from '../src/commands.js';
+import {registerWebhookWithRetry} from './telegram-webhook-retry.mjs';
 // Configure Telegram webhook after the Worker is deployed and its secrets are present.
 // Never print tokens, webhook secret, or full Telegram API URLs.
 const cfToken=process.env.CLOUDFLARE_API_TOKEN;
@@ -39,17 +40,10 @@ for(let attempt=1;attempt<=15;attempt++){
 }
 if(!healthy)throw new Error('Worker health check failed after retries: '+lastHealthError);
 
-const response=await fetch('https://api.telegram.org/bot'+botToken+'/setWebhook',{
-  method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({
-    url:workerUrl+'/webhook',
-    secret_token:webhookSecret,
-    allowed_updates:['message','callback_query','pre_checkout_query'],
-    drop_pending_updates:false
-  })
+await registerWebhookWithRetry({
+  botToken,workerUrl,webhookSecret,
+  onRetry:({attempt,maxAttempts,delayMs})=>console.log('Telegram webhook not ready ('+attempt+'/'+maxAttempts+'); retry in '+Math.ceil(delayMs/1000)+'s')
 });
-const result=await response.json().catch(()=>null);
-if(!response.ok||!result?.ok)throw new Error('Telegram setWebhook failed: '+(result?.description||response.status));
 const checkWebhook=await fetch('https://api.telegram.org/bot'+botToken+'/getWebhookInfo');
 const info=await checkWebhook.json().catch(()=>null);
 if(!checkWebhook.ok||!info?.ok||info.result?.url!==workerUrl+'/webhook')throw new Error('Webhook verification did not match the deployed Worker.');
