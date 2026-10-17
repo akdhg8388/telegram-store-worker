@@ -13,8 +13,8 @@
     }
   ],
   "vars": {
-    "STORE_NAME": "متجري الرقمي",
-    "BOT_USERNAME": "",
+    "STORE_NAME": "My Store",
+    "BOT_USERNAME": "MyStoreIQBot",
     "SUPPORT_URL": "",
     "NEWS_URL": "",
     "ASIACELL_RECEIVER": "",
