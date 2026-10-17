@@ -11,7 +11,7 @@ async function notifyAdmins(db,env,text,photoFileId=null,markup=null) {
     else await queueNotification(db,'sendMessage',{chat_id:admin,text:short(text,3900),...(markup?{reply_markup:markup}:{})});
   }
 }
-async function notifyUser(db,uid,text) {
+async function notifyUser(db,uid,text,markup=null) {
   await queueNotification(db,'sendMessage',{chat_id:uid,text:short(text,3900),...(markup?{reply_markup:markup}:{})});
 }
 async function writeTopup(db,env,ctx,uid,session,photoFileId=null,photoUniqueId=null) {
