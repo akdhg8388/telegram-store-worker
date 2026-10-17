@@ -1,5 +1,5 @@
 import {button,keyboard,backRow,adminIds,isAdmin,positiveInt,short,formatStars,formatIQD,moneyMethods,orderNames} from './common.js';
-import {telegram,sendText,answerCallback,queueNotification,flushOutbox} from './telegram.js';
+import {telegram,sendText,sendOrEditText,answerCallback,queueNotification,flushOutbox} from './telegram.js';
 import {ensureUser,getUser,setSession,getSession,clearSession,getProduct,audit} from './database.js';
 import * as ui from './ui.js';
 import {handleAdminCallback,handleAdminText} from './admin-controls.js';
@@ -15,6 +15,7 @@ async function notifyUser(db,uid,text,markup=null) {
   await queueNotification(db,'sendMessage',{chat_id:uid,text:short(text,3900),...(markup?{reply_markup:markup}:{})});
 }
 async function writeTopup(db,env,ctx,uid,session,photoFileId=null,photoUniqueId=null) {
+  if(env.ENABLE_MANUAL_TOPUPS!=='true') return sendText(env,uid,'⛔ طلبات الشحن اليدوي غير مفعلة حالياً.');
   const {method,amount,reference=null} = session.payload;
   if(!reference && !photoFileId) return sendText(env,uid,'أرسل رقم التحويل أو صورة إثبات الشحن. لا يمكن إرسال طلب فارغ.');
   let result;
@@ -34,6 +35,10 @@ async function writeTopup(db,env,ctx,uid,session,photoFileId=null,photoUniqueId=
   return sendText(env,uid,`✅ تم تسجيل طلب الشحن رقم #${id}.\n\n${formatIQD(amount)} — ${moneyMethods[method]}\nسيُراجع المدير وصول التحويل ثم يتخذ القرار.`,keyboard(backRow()));
 }
 async function handleTextState(db,env,ctx,uid,message,session) {
+  if(session.action.startsWith('topup_') && env.ENABLE_MANUAL_TOPUPS!=='true'){
+    await clearSession(db,uid);
+    return sendText(env,uid,'⛔ تم إيقاف طلبات الشحن اليدوي.');
+  }
   const t=String(message.text??'').trim();
   if(session.action==='topup_custom'){
     const amount=positiveInt(t.replace(/[\s,]/g,''));
@@ -149,13 +154,13 @@ async function handleMessage(db,env,ctx,message){
   if(message.photo?.length)return sendText(env,uid,'للشحن، افتح 👛 محفظتي أولاً.');
   return sendText(env,uid,'اختر أحد الأقسام من القائمة الرئيسية أو اكتب /start.',keyboard([button('🏠 الرئيسية','home')]));
 }
-async function adminMenu(db,env,uid){
+async function adminMenu(db,env,uid,messageId=null){
   if(!isAdmin(env,uid))return sendText(env,uid,'⛔ هذا القسم خاص بمدير المتجر.');
   const [topups,orders]=await Promise.all([
     db.prepare("SELECT count(*) n FROM topup_requests WHERE status='pending'").first(),
     db.prepare("SELECT count(*) n FROM orders WHERE status='awaiting_admin'").first()
   ]);
-  return sendText(env,uid,`🛡️ لوحة تحكم المدير — خاصة بك
+  return sendOrEditText(env,uid,`🛡️ لوحة تحكم المدير — خاصة بك
 
 💳 طلبات الشحن المعلقة: ${topups?.n||0}
 🛍️ طلبات الشراء المعلقة: ${orders?.n||0}
@@ -167,7 +172,7 @@ async function adminMenu(db,env,uid){
     [button('➕ إضافة منتج','admin_addproduct'),button('➕ إضافة قسم','admin_addcategory')],
     [button('⚙️ الإعدادات والتعليمات','admin_settings:0','primary')],
     [button('📊 الإحصائيات','admin_stats'),button('🔎 البحث عن عميل','admin_find_user')],
-    [button('📖 دليل الإدارة','admin_help')],backRow()));
+    [button('📖 دليل الإدارة','admin_help')],backRow()),messageId);
 }
 async function adminList(db,env,uid,type){
   if(!isAdmin(env,uid))return sendText(env,uid,'⛔ صلاحيات غير كافية.');
@@ -265,7 +270,7 @@ async function handleCallback(db,env,ctx,q){
     if(user?.is_blocked)return;
   }
   const data=String(q.data||'');
-  if(await handleAdminCallback(db,env,uid,data))return;
+  if(await handleAdminCallback(db,env,uid,data,q.message?.message_id))return;
   if(data==='home'){await clearSession(db,uid);return ui.home(db,env,uid,q.message?.message_id)}
   if(data==='categories')return ui.categories(db,env,uid,q.message?.message_id);
   if(data==='featured')return ui.products(db,env,uid,0,null,null,true,q.message?.message_id);
@@ -323,8 +328,16 @@ ${short(p.title,100)}
     if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ تم إيقاف الطلبات الجديدة مؤقتاً.');
     const id=positiveInt(data.split(':')[1]),p=id?await getProduct(db,id):null;
     if(!p || p.stock===0)return sendText(env,uid,'هذا المنتج لم يعد متاحاً.');
-    const res=await db.prepare('INSERT OR IGNORE INTO orders(user_tg_id,product_id,quantity,unit_price_stars,total_stars,source_callback_id) VALUES (?,?,?,?,?,?)').bind(uid,p.id,1,p.price_stars,p.price_stars,q.id).run();
-    const oid=res.meta?.changes ? res.meta.last_row_id : (await db.prepare('SELECT id FROM orders WHERE source_callback_id=?').bind(q.id).first())?.id;
+    // A new callback_query.id is produced for every tap. Deduplicate by the
+    // confirmation message itself as well so rapid double taps do not buy twice.
+    const confirmationMessageId=Number.isSafeInteger(q.message?.message_id) ? q.message.message_id : null;
+    const res=await db.prepare(`INSERT OR IGNORE INTO orders
+      (user_tg_id,product_id,quantity,unit_price_stars,total_stars,source_callback_id,source_message_id)
+      VALUES (?,?,?,?,?,?,?)`).bind(uid,p.id,1,p.price_stars,p.price_stars,q.id,confirmationMessageId).run();
+    const previous=confirmationMessageId!==null
+      ? await db.prepare('SELECT id FROM orders WHERE user_tg_id=? AND source_message_id=?').bind(uid,confirmationMessageId).first()
+      : await db.prepare('SELECT id FROM orders WHERE source_callback_id=?').bind(q.id).first();
+    const oid=res.meta?.changes ? res.meta.last_row_id : previous?.id;
     if(!res.meta?.changes) return sendText(env,uid,`تم تسجيل هذا الطلب مسبقاً برقم #${oid}.`);
     await notifyAdmins(db,env,`🛍️ طلب شراء جديد #${oid}
 👤 العميل: ${uid}
@@ -339,6 +352,9 @@ ${short(p.title,100)}
   if(data==='topup'){
     if(env.ENABLE_MANUAL_TOPUPS!=='true')return sendText(env,uid,'⛔ الشحن اليدوي غير مفعّل حالياً. الدفع مقابل المنتجات الرقمية يتم عبر Telegram Stars.',keyboard(backRow()));
     return ui.topupMethods(db,env,uid,q.message?.message_id);
+  }
+  if(data.startsWith('topup_method:') || data.startsWith('topup_custom:') || data.startsWith('topup_amount:')){
+    if(env.ENABLE_MANUAL_TOPUPS!=='true')return sendText(env,uid,'⛔ الشحن اليدوي غير مفعّل حالياً.');
   }
   if(data.startsWith('topup_method:')){
     const method=data.split(':')[1];if(!moneyMethods[method])return;
@@ -355,7 +371,7 @@ ${short(p.title,100)}
     await setSession(db,uid,'topup_reference',{method,amount});
     return sendText(env,uid,`💰 مبلغ الشحن: ${formatIQD(amount)}\n\nأرسل رقم العملية أو بيانات التحويل. إذا لا يوجد رقم اكتب - ثم أرسل صورة الإثبات.`);
   }
-  if(data==='admin')return adminMenu(db,env,uid);
+  if(data==='admin')return adminMenu(db,env,uid,q.message?.message_id);
   if(data==='admin_topups')return adminList(db,env,uid,'topups');
   if(data==='admin_orders')return adminList(db,env,uid,'orders');
   if(data==='admin_delivery')return adminList(db,env,uid,'delivery');

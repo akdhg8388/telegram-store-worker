@@ -11,6 +11,9 @@ export default {
     if(!supplied || supplied!==env.WEBHOOK_SECRET)return new Response('Forbidden',{status:403});
     let update;
     try {update=await request.json()} catch{return new Response('Invalid JSON',{status:400})}
+    if(!update || typeof update!=='object' || Array.isArray(update) ||
+       !Number.isSafeInteger(update.update_id) || update.update_id<0)
+      return new Response('Invalid Telegram update',{status:400});
     try{
       await processUpdate(env.DB,env,ctx,update);
       ctx.waitUntil(flushOutbox(env.DB,env).catch(e=>console.error('Outbox',String(e))));

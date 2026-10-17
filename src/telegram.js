@@ -6,7 +6,9 @@ export async function telegram(env, method, params) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok || data?.ok !== true) {
-    throw new Error(`Telegram ${method}: ${response.status}: ${data?.description || 'unexpected response'}`);
+    const err=new Error(`Telegram ${method}: ${response.status}: ${data?.description || 'unexpected response'}`);
+    err.retryAfter=Number.isSafeInteger(data?.parameters?.retry_after) ? data.parameters.retry_after : null;
+    throw err;
   }
   return data.result;
 }
@@ -35,20 +37,23 @@ export async function queueNotification(db, method, params) {
 }
 export async function flushOutbox(db, env, limit = 10) {
   const now = Math.floor(Date.now()/1000);
-  const rows = await db.prepare(`SELECT id,method,payload FROM notification_outbox
-    WHERE state='pending' OR (state='sending' AND lease_until < ?) ORDER BY id LIMIT ?`)
-    .bind(now, limit).all();
+  const rows = await db.prepare(`SELECT id,method,payload,attempts FROM notification_outbox
+    WHERE (state='pending' AND next_attempt_at <= ?) OR (state='sending' AND lease_until < ?) ORDER BY id LIMIT ?`)
+    .bind(now, now, limit).all();
   for(const item of rows.results ?? []) {
     const claim = await db.prepare(`UPDATE notification_outbox SET state='sending',lease_until=?,attempts=attempts+1
-      WHERE id=? AND (state='pending' OR (state='sending' AND lease_until < ?))`)
-      .bind(now+90,item.id,now).run();
+      WHERE id=? AND ((state='pending' AND next_attempt_at <= ?) OR (state='sending' AND lease_until < ?))`)
+      .bind(now+90,item.id,now,now).run();
     if(!claim.meta?.changes) continue;
     try {
       await telegram(env, item.method, JSON.parse(item.payload));
       await db.prepare("UPDATE notification_outbox SET state='sent' WHERE id=?").bind(item.id).run();
     } catch(error) {
       console.error('Outbox delivery error', item.id, String(error));
-      await db.prepare("UPDATE notification_outbox SET state='pending',lease_until=0 WHERE id=?").bind(item.id).run();
+      const backoff=Math.min(3600, 10 * 2 ** Math.min(8,item.attempts));
+      const delay=Math.max(backoff, Number.isSafeInteger(error.retryAfter) ? error.retryAfter : 0);
+      await db.prepare("UPDATE notification_outbox SET state='pending',lease_until=0,next_attempt_at=? WHERE id=?")
+        .bind(Math.floor(Date.now()/1000)+delay,item.id).run();
     }
   }
 }

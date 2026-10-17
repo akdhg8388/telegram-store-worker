@@ -6,14 +6,16 @@ import { formatIQD,formatStars,positiveInt,isAdmin,button } from '../src/common.
 
 function freshDb(){
   const db=new DatabaseSync(':memory:');
-  db.exec(readFileSync(new URL('../migrations/0001_init.sql',import.meta.url),'utf8'));
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql'])
+    db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   db.prepare('INSERT INTO users(tg_id,first_name) VALUES (?,?)').run(101,'Ali');
   db.prepare("INSERT INTO products(category_id,title,price_stars,stock) VALUES (1,'Premium',20,2)").run();
   return db;
 }
 
 test('database initializes with categories, no fabricated products',()=>{
-  const db=new DatabaseSync(':memory:');db.exec(readFileSync(new URL('../migrations/0001_init.sql',import.meta.url),'utf8'));
+  const db=new DatabaseSync(':memory:');for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql'])
+    db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   assert.equal(db.prepare('SELECT count(*) n FROM products').get().n,0);
   assert.ok(db.prepare('SELECT count(*) n FROM categories').get().n>=8);
   db.close();
@@ -75,5 +77,16 @@ test('repeated purchase callback creates a single order',()=>{
   const q=db.prepare('INSERT OR IGNORE INTO orders(user_tg_id,product_id,unit_price_stars,total_stars,source_callback_id) VALUES (101,1,20,20,?)');
   q.run('callbackABC');q.run('callbackABC');
   assert.equal(db.prepare('SELECT count(*) n FROM orders').get().n,1);
+  db.close();
+});
+
+
+test('confirmation message unique per user but separate messages are allowed',()=>{
+  const db=freshDb();
+  const add=db.prepare('INSERT OR IGNORE INTO orders(user_tg_id,product_id,unit_price_stars,total_stars,source_callback_id,source_message_id) VALUES(101,1,20,20,?,?)');
+  assert.equal(add.run('first',111).changes,1);
+  assert.equal(add.run('second',111).changes,0);
+  assert.equal(add.run('third',112).changes,1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM orders').get().n,2);
   db.close();
 });

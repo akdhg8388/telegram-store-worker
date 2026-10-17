@@ -9,7 +9,7 @@ import {home} from '../src/ui.js';
 
 function sqliteAdapter(){
  const connection=new DatabaseSync(':memory:');
- for(const file of ['0001_init.sql','0002_admin_controls.sql'])
+ for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql'])
    connection.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
  const db={
    prepare(sql){
@@ -133,6 +133,22 @@ test('owner can block account without blocking themselves',async()=>{
    assert.equal(connection.prepare('SELECT is_blocked FROM users WHERE tg_id=992').get().is_blocked,1);
    await handleAdminCallback(db,env,991,'admin_user_toggle:991');
    assert.equal(connection.prepare('SELECT is_blocked FROM users WHERE tg_id=991').get().is_blocked,0);
+ });
+ connection.close();
+});
+
+
+test('admin settings and product views update the current inline message',async()=>{
+ const {db,connection}=sqliteAdapter();
+ connection.prepare("INSERT INTO users(tg_id,first_name) VALUES (991,'Owner')").run();
+ connection.prepare("INSERT INTO products(category_id,title,price_stars) VALUES(1,'Demo',15)").run();
+ await mockTelegram(async(calls)=>{
+   assert.equal(await handleAdminCallback(db,env,991,'admin_settings:0',123),true);
+   assert.equal(await handleAdminCallback(db,env,991,'admin_products:0',123),true);
+   assert.equal(await handleAdminCallback(db,env,991,'admin_product:1',123),true);
+   assert.equal(await handleAdminCallback(db,env,991,'admin_stats',123),true);
+   assert.equal(calls.length,4);
+   assert.ok(calls.every(c=>c.method==='editMessageText' && c.body.message_id===123));
  });
  connection.close();
 });
