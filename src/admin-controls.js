@@ -12,21 +12,22 @@ const adminBack=[button('🛡️ لوحة المدير','admin')];
 const backTo=(destination)=>[button('⬅️ رجوع',destination)];
 
 export function adminRoute(data){
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function stats(db,env,uid,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
-  const [users,products,categories,pending,paid,topups,sales]=await Promise.all([
+  const [users,products,categories,pending,paid,topups,sales,walletSales]=await Promise.all([
     db.prepare('SELECT COUNT(*) n FROM users').first(),
     db.prepare('SELECT COUNT(*) n FROM products WHERE active=1').first(),
     db.prepare('SELECT COUNT(*) n FROM categories WHERE active=1').first(),
     db.prepare("SELECT COUNT(*) n FROM orders WHERE status='awaiting_admin'").first(),
     db.prepare("SELECT COUNT(*) n FROM orders WHERE status='paid_pending_delivery'").first(),
     db.prepare("SELECT COUNT(*) n FROM topup_requests WHERE status='pending'").first(),
-    db.prepare("SELECT COUNT(*) orders_count,COALESCE(SUM(total_stars),0) stars FROM orders WHERE status='delivered'").first()
+    db.prepare("SELECT COUNT(*) orders_count,COALESCE(SUM(total_stars),0) stars FROM orders WHERE status='delivered'").first(),
+    db.prepare('SELECT COUNT(*) AS n,COALESCE(SUM(price_iqd),0) AS iqd FROM wallet_purchases').first()
   ]);
-  return reply(`📊 إحصائيات المتجر\n\n👥 المستخدمون: ${users.n}\n🛍️ المنتجات المنشورة: ${products.n}\n📂 الأقسام النشطة: ${categories.n}\n⏳ طلبات الشراء المعلقة: ${pending.n}\n📦 مدفوع بانتظار التسليم: ${paid.n}\n💳 طلبات الشحن المعلقة: ${topups.n}\n✅ الطلبات المكتملة: ${sales.orders_count}\n⭐ نجوم الطلبات المكتملة: ${sales.stars}\n\nملاحظة: إحصاء الإيرادات هو عدد نجوم الطلبات، وليس الأرباح الصافية.`,keyboard(adminBack));
+  return reply(`📊 إحصائيات المتجر\n\n👥 المستخدمون: ${users.n}\n🛍️ المنتجات المنشورة: ${products.n}\n📂 الأقسام النشطة: ${categories.n}\n⏳ طلبات الشراء المعلقة: ${pending.n}\n📦 مدفوع بانتظار التسليم: ${paid.n}\n💳 طلبات الشحن المعلقة: ${topups.n}\n✅ مشتريات المحفظة المكتملة: ${walletSales.n}\n💰 إجمالي مشتريات المحفظة: ${formatIQD(walletSales.iqd)}\n✅ الطلبات القديمة المكتملة: ${sales.orders_count}\n⭐ نجوم الطلبات القديمة المكتملة: ${sales.stars}\n\nملاحظة: إحصاء الإيرادات هو عدد نجوم الطلبات، وليس الأرباح الصافية.`,keyboard(adminBack));
 }
 
 async function settings(db,env,uid,page=0,messageId=null){
@@ -57,9 +58,9 @@ async function settingDetail(db,env,uid,key,messageId=null){
 async function products(db,env,uid,page=0,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
   const pageSize=7;
-  const items=(await db.prepare('SELECT id,title,price_stars,active,stock FROM products ORDER BY id DESC LIMIT ? OFFSET ?')
+  const items=(await db.prepare('SELECT id,title,price_iqd,active,stock FROM products ORDER BY id DESC LIMIT ? OFFSET ?')
     .bind(pageSize+1,Math.max(0,page)*pageSize).all()).results??[];
-  const rows=items.slice(0,pageSize).map(p=>[button(`${p.active?'🟢':'🔴'} #${p.id} ${short(p.title,23)} • ${formatStars(p.price_stars)}`,`admin_product:${p.id}`)]);
+  const rows=items.slice(0,pageSize).map(p=>[button(`${p.active?'🟢':'🔴'} #${p.id} ${short(p.title,23)} • ${p.price_iqd?formatIQD(p.price_iqd):'بدون سعر محفظة'}`,`admin_product:${p.id}`)]);
   const nav=[];
   if(page>0)nav.push(button('⬅️ السابق',`admin_products:${page-1}`));
   if(items.length>pageSize)nav.push(button('التالي ➡️',`admin_products:${page+1}`));
@@ -70,7 +71,10 @@ async function products(db,env,uid,page=0,messageId=null){
 const PRODUCT_FIELDS={
   title:{label:'🏷️ الاسم',max:150},
   description:{label:'📝 الوصف',max:1800},
-  price_stars:{label:'⭐ السعر',integer:true,min:1,max:10000000},
+  price_iqd:{label:'💰 سعر المحفظة بالدينار',integer:true,min:1,max:100000000},
+  usage_instructions:{label:'📖 طريقة الاستخدام',max:1800},
+  delivery_shared_text:{label:'📦 محتوى التسليم الثابت',max:2000},
+  price_stars:{label:'⭐ سعر قديم (للسجل فقط)',integer:true,min:1,max:10000000},
   stock:{label:'📦 المخزون',integer:true,min:0,max:1000000,nullable:true},
   duration_months:{label:'🗓️ المدة بالأشهر',integer:true,min:1,max:120,nullable:true},
   delivery_instructions:{label:'📦 تعليمات التسليم الخاصة',max:1800},
@@ -93,13 +97,17 @@ async function productDetail(db,env,uid,id,messageId=null){
   const p=await db.prepare('SELECT p.*,c.title category_title FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=?').bind(id).first();
   if(!p)return reply('المنتج غير موجود.',keyboard(adminBack));
   const rows=[];
-  for(const fields of [['title','description'],['price_stars','stock'],['duration_months','delivery_instructions']])
+  for(const fields of [['title','description'],['price_iqd','stock'],['duration_months','usage_instructions'],['delivery_shared_text','delivery_instructions']])
     rows.push(fields.map(f=>button(PRODUCT_FIELDS[f].label,`admin_product_field:${id}:${f}`)));
+  rows.push([button('📷 إضافة/تغيير صورة المنتج',`admin_product_photo:${id}`,'primary'),button('🗑️ حذف الصورة',`admin_product_photo_delete:${id}`,'danger')]);
+  rows.push([button('📦 تسليم محتوى ثابت',`admin_product_mode:${id}:shared`,'success'),button('🔑 تسليم كود فريد',`admin_product_mode:${id}:unique`,'primary')]);
+  rows.push([button('➕ إضافة كود تسليم فريد',`admin_product_code:${id}`,'success'),button('⏸️ إيقاف الشراء التلقائي',`admin_product_mode:${id}:disabled`,'danger')]);
   rows.push([button('📂 نقل إلى قسم آخر',`admin_product_categories:${id}`)]);
   rows.push([button(p.active?'🚫 إخفاء المنتج':'✅ إظهار المنتج',`admin_product_toggle:${id}:active`,p.active?'danger':'success'),
              button(p.featured?'⭐ إلغاء التمييز':'🌟 تمييز المنتج',`admin_product_toggle:${id}:featured`)]);
   rows.push(backTo('admin_products:0'),adminBack);
-  return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 ${formatStars(p.price_stars)}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
+  const codes=await db.prepare('SELECT COUNT(*) n FROM product_delivery_items WHERE product_id=? AND used_by_purchase_id IS NULL').bind(id).first();
+  return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 سعر المحفظة: ${p.price_iqd?formatIQD(p.price_iqd):'لم يحدد'}\n📷 الصورة: ${p.photo_file_id?'✅ محفوظة':'—'}\n📖 طريقة الاستخدام: ${short(p.usage_instructions||'لم تضف',100)}\n📦 طريقة التسليم: ${p.fulfillment_mode}\n🔑 أكواد غير مستخدمة: ${codes?.n||0}\n📦 المحتوى الثابت: ${p.delivery_shared_text?'✅ محفوظ':'—'}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
 }
 async function categories(db,env,uid,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
@@ -307,7 +315,30 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_setting:'))await settingDetail(db,env,uid,data.substring('admin_setting:'.length),messageId);
   else if(data.startsWith('admin_products'))await products(db,env,uid,Math.min(100,positiveInt(data.split(':')[1])??0),messageId);
   else if(data.startsWith('admin_product:'))await productDetail(db,env,uid,Number(data.split(':')[1]),messageId);
-  else if(data.startsWith('admin_product_field:')){
+  else if(data.startsWith('admin_product_photo:')){
+    const id=positiveInt(data.split(':')[1]);if(!id)return true;
+    await setSession(db,uid,'owner_product_photo',{id});
+    await sendText(env,uid,'📷 أرسل صورة المنتج الآن (كصورة عادية في تيليجرام). للإلغاء /cancel.');
+  }
+  else if(data.startsWith('admin_product_photo_delete:')){
+    const id=positiveInt(data.split(':')[1]);if(!id)return true;
+    await db.prepare('UPDATE products SET photo_file_id=NULL WHERE id=?').bind(id).run();
+    await audit(db,uid,'remove_product_photo','product',id);
+    await productDetail(db,env,uid,id,messageId);
+  }
+  else if(data.startsWith('admin_product_mode:')){
+    const [,rawId,mode]=data.split(':');const id=positiveInt(rawId);
+    if(!id||!['shared','unique','disabled'].includes(mode))return true;
+    await db.prepare('UPDATE products SET fulfillment_mode=? WHERE id=?').bind(mode,id).run();
+    await audit(db,uid,'set_delivery_mode','product',id);
+    await productDetail(db,env,uid,id,messageId);
+  }
+  else if(data.startsWith('admin_product_code:')){
+    const id=positiveInt(data.split(':')[1]);if(!id)return true;
+    await setSession(db,uid,'owner_product_code',{id});
+    await sendText(env,uid,'🔑 أرسل كوداً أو بيانات اشتراك واحدة للتسليم مرة واحدة فقط. ستحفظ كقطعة فريدة. للإلغاء /cancel.');
+  }
+  else if(data.startsWith('admin_product_field:')){ 
     const [, id,field]=data.split(':');
     if(!PRODUCT_FIELDS[field] || !positiveInt(id))return true;
     await setSession(db,uid,'owner_product_field',{id:Number(id),field});
@@ -360,13 +391,33 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await setSession(db,uid,'owner_user_search');
     await sendText(env,uid,'🔎 اكتب Telegram ID للعميل الذي تريد عرض ملفه. للإلغاء /cancel.');
   }
-  else if(data==='admin_help')await sendText(env,uid,'📖 دليل الإدارة\n\n• تعديل الأسعار والنصوص من الأزرار داخل لوحة المدير.\n• الطلبات والمدفوعات لا تكتمل دون مراجعتك.\n• إخفاء منتج لا يمسح الطلبات القديمة.\n• أسرار Cloudflare وهوية المدير لا يمكن تغييرهما من داخل البوت.\n• لتفعيل طلبات الشحن، أدخل سعر الصرف وبيانات استلام رصيد زين أو سوبر كي أو Binance، ثم فعّل الزر من الإعدادات. لا تستخدم الرصيد الداخلي بديلاً عن Stars لبيع الخدمات الرقمية.\n• للتراجع عن أي عملية تحرير: /cancel.',keyboard(adminBack));
+  else if(data==='admin_help')await sendText(env,uid,'📖 دليل الإدارة\n\n• تعديل الأسعار والنصوص من الأزرار داخل لوحة المدير.\n• شراء المحفظة يتم تلقائياً عند وجود السعر والمخزون ومحتوى تسليم جاهز.\n• إخفاء منتج لا يمسح الطلبات القديمة.\n• أسرار Cloudflare وهوية المدير لا يمكن تغييرهما من داخل البوت.\n• لتفعيل طلبات الشحن، أدخل سعر الصرف وبيانات استلام رصيد زين أو سوبر كي أو Binance، ثم فعّل الزر من الإعدادات. لا تستخدم الرصيد الداخلي بديلاً عن Stars لبيع الخدمات الرقمية.\n• للتراجع عن أي عملية تحرير: /cancel.',keyboard(adminBack));
   return true;
 }
 
 export async function handleAdminText(db,env,uid,session,message){
   if(!isAdmin(env,uid))return false;
   const text=String(message.text??'').trim();
+  if(session.action==='owner_product_photo'){
+    const id=positiveInt(session.payload?.id);
+    if(!id)return true;
+    if(!message.photo?.length){await sendText(env,uid,'📷 أرسل صورة، أو /cancel للإلغاء.');return true;}
+    await db.prepare('UPDATE products SET photo_file_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(message.photo.at(-1).file_id,id).run();
+    await audit(db,uid,'set_product_photo','product',id);
+    await clearSession(db,uid);
+    await sendText(env,uid,'✅ تم حفظ الصورة وستظهر عند تسليم المنتج.',keyboard([button('📦 إعداد المنتج',`admin_product:${id}`,'success')],adminBack));
+    return true;
+  }
+  if(session.action==='owner_product_code'){
+    const id=positiveInt(session.payload?.id);
+    if(!id)return true;
+    if(!text||text.length>1800){await sendText(env,uid,'أرسل بيانات تسليم من 1 إلى 1800 حرف.');return true;}
+    const item=await db.prepare('INSERT INTO product_delivery_items(product_id,payload) SELECT id,? FROM products WHERE id=?').bind(text,id).run();
+    if(item.meta?.changes)await audit(db,uid,'add_unique_delivery','product',id);
+    await clearSession(db,uid);
+    await sendText(env,uid,'✅ تمت إضافة قطعة تسليم واحدة. لن تُباع مرتين. اضبط وضع التسليم إلى «كود فريد» إن لم يكن مفعلاً.',keyboard([button('📦 إعداد المنتج',`admin_product:${id}`,'success')],adminBack));
+    return true;
+  }
   if(session.action==='owner_bot_profile_picture'){
     if(!message.photo?.length){await sendText(env,uid,'📷 أرسل صورة باستخدام خيار الصور في تيليجرام (JPEG). للإلغاء /cancel.');return true;}
     try {

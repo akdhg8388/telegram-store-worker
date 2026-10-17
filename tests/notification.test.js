@@ -7,7 +7,7 @@ import {flushOutbox,queueNotification} from '../src/telegram.js';
 
 function setup(){
   const conn=new DatabaseSync(':memory:');
-  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql'])
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql'])
     conn.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   const db={
     prepare(sql){
@@ -65,26 +65,29 @@ test('outbox backs off after Telegram rate limiting and does not retry immediate
   } finally {globalThis.fetch=original;conn.close();}
 });
 
-test('rapid double-tap with different callback IDs creates only one order',async()=>{
+test('rapid duplicate wallet purchase confirmation only debits once and reserves one unit',async()=>{
  const {conn,db}=setup();
  conn.prepare("INSERT INTO users(tg_id,first_name) VALUES(101,'Shopper'),(991,'Owner')").run();
- conn.prepare("INSERT INTO products(category_id,title,price_stars,stock) VALUES(1,'Demo',20,5)").run();
- const before=globalThis.fetch;
+ conn.prepare("INSERT INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key) VALUES(101,20000,'topup','real-credit')").run();
+ conn.prepare("INSERT INTO products(category_id,title,price_stars,price_iqd,stock,fulfillment_mode,delivery_shared_text) VALUES(1,'Demo',1,5000,5,'shared','demo-data')").run();
+ const previous=globalThis.fetch;
  globalThis.fetch=async(url,init)=>new Response(JSON.stringify({ok:true,result:{message_id:88}}),{status:200});
  try{
-   const background=[];
-   for(const [updateId,callbackId] of [[3000,'cbA'],[3001,'cbB']]){
-     await processUpdate(db,{ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'TEST_TOKEN'},
-       {waitUntil(p){background.push(p)}},
-       {update_id:updateId,callback_query:{id:callbackId,from:{id:101,first_name:'Shopper'},
-        message:{message_id:555,chat:{id:101,type:'private'}},data:'confirm_buy:1'}});
-   }
-   await Promise.all(background);
-   assert.equal(conn.prepare('SELECT COUNT(*) n FROM orders').get().n,1);
-   assert.equal(conn.prepare('SELECT COUNT(*) n FROM notification_outbox').get().n,1);
- } finally {globalThis.fetch=before;conn.close();}
+   const jobs=[],e={ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'TEST_TOKEN'};
+   const click=(id,data,num)=>processUpdate(db,e,{waitUntil(x){jobs.push(x)}},
+      {update_id:num,callback_query:{id,from:{id:101,first_name:'Shopper'},message:{message_id:555,chat:{id:101,type:'private'}},data}});
+   await click('begin','buy:1',2999);
+   const pending=conn.prepare('SELECT payload FROM user_sessions WHERE user_tg_id=101').get();
+   const nonce=JSON.parse(pending.payload).nonce;
+   await click('cbA','wallet_confirm:'+nonce,3000);
+   await click('cbB','wallet_confirm:'+nonce,3001);
+   await Promise.all(jobs);
+   assert.equal(conn.prepare('SELECT COUNT(*) n FROM wallet_purchases').get().n,1);
+   assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,15000);
+   assert.equal(conn.prepare('SELECT stock FROM products WHERE id=1').get().stock,4);
+   assert.equal(conn.prepare("SELECT COUNT(*) n FROM wallet_ledger WHERE kind='permitted_purchase'").get().n,1);
+ } finally {globalThis.fetch=previous;conn.close();}
 });
-
 
 test('disabled manual wallet topup cannot be bypassed with stale inline buttons or sessions',async()=>{
  const {db,conn}=setup();

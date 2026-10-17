@@ -7,7 +7,7 @@ import {backRow} from '../src/common.js';
 
 function createTestDb(){
   const conn=new DatabaseSync(':memory:');
-  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql'])
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql'])
     conn.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   conn.prepare("INSERT INTO users(tg_id,first_name) VALUES (101,'Owner')").run();
   const db={prepare(sql){const stmt=conn.prepare(sql);let values=[];

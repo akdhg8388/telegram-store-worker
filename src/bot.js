@@ -8,6 +8,7 @@ import {USD_PRESETS,formatQuote,usdRate,isTopupEnabled,receiverFor,quoteMinor,qu
 import {amountInIQD,topupDecisionText,guardUser} from './moderation.js';
 import {submitSupport,handleSupportCallback,handleSupportReply,handleCustomerSupportCallback} from './support.js';
 import {handleUserCallback,handleUserText} from './admin-users.js';
+import {beginPurchase,commitPurchase,showReceipt,purchaseList} from './wallet-purchase.js';
 
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}) {
   for(const admin of adminIds(env)) {
@@ -95,17 +96,17 @@ async function handleTextState(db,env,ctx,uid,message,session) {
   }
   if(session.action==='admin_product' && isAdmin(env,uid)) {
     const bits=t.split('|').map(s=>s.trim());
-    if(bits.length!==6) return sendText(env,uid,'الصيغة: اسم المنتج | رقم القسم | السعر بالنجوم | المدة بالأشهر أو - | المخزون أو - | الوصف');
-    const [title,cat,stars,duration,stock,description]=bits;
-    const category=positiveInt(cat),price=positiveInt(stars);
+    if(bits.length!==6) return sendText(env,uid,'الصيغة: اسم المنتج | رقم القسم | سعر المحفظة بالدينار | المدة بالأشهر أو - | المخزون أو - | الوصف');
+    const [title,cat,iqd,duration,stock,description]=bits;
+    const category=positiveInt(cat),price=positiveInt(iqd);
     const months=duration==='-'?null:positiveInt(duration), quantity=stock==='-'?null:Number(stock);
-    if(!title || title.length>150 || !category || !price || price>10000000 || (duration!=='-'&&!months) || (stock!=='-'&&(!Number.isSafeInteger(quantity)||quantity<0)) || description.length>1800) return sendText(env,uid,'بيانات غير صالحة. تحقق من السعر والمدة والمخزون وطول الاسم والوصف.');
+    if(!title || title.length>150 || !category || !price || price>100000000 || (duration!=='-'&&!months) || (stock!=='-'&&(!Number.isSafeInteger(quantity)||quantity<0)) || description.length>1800) return sendText(env,uid,'بيانات غير صالحة. تحقق من السعر والمدة والمخزون وطول الاسم والوصف.');
     const catrow=await db.prepare('SELECT id FROM categories WHERE id=? AND active=1').bind(category).first();
     if(!catrow)return sendText(env,uid,'رقم القسم غير موجود. افتح الأقسام لمعرفة أرقامها.');
-    const r=await db.prepare(`INSERT INTO products(category_id,title,price_stars,duration_months,stock,description) VALUES (?,?,?,?,?,?)`).bind(category,title,price,months,quantity,description).run();
+    const r=await db.prepare('INSERT INTO products(category_id,title,price_stars,price_iqd,duration_months,stock,description) VALUES (?,?,1,?,?,?,?)').bind(category,title,price,months,quantity,description).run();
     await audit(db,uid,'create','product',r.meta.last_row_id);
     await clearSession(db,uid);
-    return sendText(env,uid,`✅ تمت إضافة المنتج #${r.meta.last_row_id}: ${title}`,keyboard([button('🛍️ عرض المنتج',`product:${r.meta.last_row_id}`)],backRow()));
+    return sendText(env,uid,`✅ تمت إضافة المنتج #${r.meta.last_row_id}: ${title}\n⚙️ افتح إدارته وأضف محتوى التسليم وطريقة الاستخدام حتى يصبح قابلاً للشراء تلقائياً.`,keyboard([button('⚙️ إعداد تسليم المنتج',`admin_product:${r.meta.last_row_id}`,'success')],backRow()));
   }
   if(session.action==='admin_category' && isAdmin(env,uid)){
     const [title,emoji='🛍️']=t.split('|').map(s=>s.trim());
@@ -143,11 +144,12 @@ async function handleMessage(db,env,ctx,message){
   if(text==='/cancel'){await clearSession(db,uid);return ui.home(db,env,uid)}
   if(text==='/admin')return adminMenu(db,env,uid);
   if(text==='/orders'){await clearSession(db,uid);return ui.orders(db,env,uid)}
+  if(text==='/purchases'){await clearSession(db,uid);return purchaseList(db,env,uid)}
   if(text==='/wallet'){await clearSession(db,uid);return ui.wallet(db,env,uid)}
   if(text==='/topup'){await clearSession(db,uid);return await isTopupEnabled(db,env)?ui.topupPresets(db,env,uid):ui.wallet(db,env,uid)}
   if(text==='/currency'){await clearSession(db,uid);return ui.currencyMenu(db,env,uid)}
   if(text==='/support'){await clearSession(db,uid);return ui.supportMenu(db,env,uid);}
-  if(text==='/paysupport')return sendText(env,uid,'💳 للمساعدة بشأن مدفوعات Telegram Stars أرسل /support واكتب رقم الطلب ومشكلتك.');
+  if(text==='/paysupport')return sendText(env,uid,'💳 للمساعدة بشأن شراء المحفظة، افتح /support واكتب رقم عملية الشراء.');
   if(text==='/terms')return sendText(env,uid,await getSetting(db,'terms_text','📜 شروط مبدئية: لا يتم التسليم إلا بعد الدفع وموافقة المدير. تختلف الشروط حسب المنتج. للدعم: /support. حدّث الشروط قبل التشغيل العام.'));
   if(text==='/privacy')return sendText(env,uid,await getSetting(db,'privacy_text','🔐 سيتم تحديث سياسة الخصوصية قبل استقبال العملاء.'));
   if(text==='/id')return sendText(env,uid,`🆔 معرف حسابك الرقمي في تيليجرام هو: ${uid}`);
@@ -382,44 +384,27 @@ async function handleCallback(db,env,ctx,q){
     return ui.productView(db,env,uid,productId,q.message?.message_id);
   }
   if(data.startsWith('buy:')){
-    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر لا يستقبل طلبات جديدة حالياً.');
-    const id=positiveInt(data.split(':')[1]),p=id?await getProduct(db,id):null;
-    if(!p || p.stock===0)return sendText(env,uid,'هذا المنتج غير متوفر حالياً.');
-    const instr=await getSetting(db,'purchase_instructions','');
-    return sendText(env,uid,`🛒 تأكيد الطلب
-
-${short(p.title,100)}
-المدة: ${p.duration_months||'حسب الخدمة'} شهر
-الكمية: 1
-السعر: ${formatStars(p.price_stars)}
-
-سيُراجع المدير طلبك قبل السماح بالدفع والتسليم.${instr?'\n\n'+short(instr,1000):''}`,keyboard([button('✅ إرسال طلب للمدير',`confirm_buy:${p.id}`,'success')],[button('↩️ عودة للمنتج',`product:${p.id}`)]));
+    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر لا يستقبل مشتريات جديدة حالياً.');
+    const id=positiveInt(data.split(':')[1]);
+    const p=id?await getProduct(db,id):null;
+    return beginPurchase(db,env,uid,p);
   }
-  if(data.startsWith('confirm_buy:')){
-    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ تم إيقاف الطلبات الجديدة مؤقتاً.');
-    const id=positiveInt(data.split(':')[1]),p=id?await getProduct(db,id):null;
-    if(!p || p.stock===0)return sendText(env,uid,'هذا المنتج لم يعد متاحاً.');
-    // A new callback_query.id is produced for every tap. Deduplicate by the
-    // confirmation message itself as well so rapid double taps do not buy twice.
-    const confirmationMessageId=Number.isSafeInteger(q.message?.message_id) ? q.message.message_id : null;
-    const res=await db.prepare(`INSERT OR IGNORE INTO orders
-      (user_tg_id,product_id,quantity,unit_price_stars,total_stars,source_callback_id,source_message_id)
-      VALUES (?,?,?,?,?,?,?)`).bind(uid,p.id,1,p.price_stars,p.price_stars,q.id,confirmationMessageId).run();
-    const previous=confirmationMessageId!==null
-      ? await db.prepare('SELECT id FROM orders WHERE user_tg_id=? AND source_message_id=?').bind(uid,confirmationMessageId).first()
-      : await db.prepare('SELECT id FROM orders WHERE source_callback_id=?').bind(q.id).first();
-    const oid=res.meta?.changes ? res.meta.last_row_id : previous?.id;
-    if(!res.meta?.changes) return sendText(env,uid,`تم تسجيل هذا الطلب مسبقاً برقم #${oid}.`);
-    await notifyAdmins(db,env,`🛍️ طلب شراء جديد #${oid}
-👤 العميل: ${uid}
-🛍️ المنتج: ${short(p.title,160)}
-💰 السعر: ${formatStars(p.price_stars)}
-📦 الكمية: 1
-⏳ ينتظر موافقة المدير.`,null,keyboard([button('✅ قبول',`order_approve:${oid}`,'success'),button('❌ رفض',`order_reject:${oid}`,'danger')]));
-    ctx.waitUntil(flushOutbox(db,env));
-    return sendText(env,uid,`✅ تم إنشاء طلبك #${oid}.\n\nبانتظار موافقة المدير. لن يُطلب منك الدفع قبل الموافقة.`,keyboard([button('📦 طلباتي','orders')],backRow()));
+  if(data.startsWith('wallet_confirm:')){
+    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر أوقف استقبال الشراء مؤقتاً.');
+    const nonce=data.slice('wallet_confirm:'.length);
+    const result=await commitPurchase(db,env,uid,nonce);
+    if(!result)return sendText(env,uid,'انتهت صلاحية هذا التأكيد. افتح المنتج مجدداً.');
+    if(result.failed)return sendText(env,uid,'⛔ '+result.failed,keyboard([button('💳 شحن المحفظة','topup','success'),button('🛍️ المتجر','categories')],backRow()));
+    return showReceipt(db,env,uid,result.id);
   }
-  if(data.startsWith('pay:'))return invoice(db,env,uid,Number(data.split(':')[1]));
+  if(data==='wallet_purchases')return purchaseList(db,env,uid,q.message?.message_id);
+  if(data.startsWith('wallet_receipt:')){
+    const id=positiveInt(data.split(':')[1]);
+    if(id)return showReceipt(db,env,uid,id);
+  }
+  // Legacy Stars orders remain auditable but no new invoice may be initiated.
+  if(data.startsWith('pay:') || data.startsWith('confirm_buy:'))return sendText(env,uid,'هذا الزر يعود لنظام شراء قديم. افتح المتجر لاستخدام نظام المحفظة الجديد.');
+
   if(data==='currency')return ui.currencyMenu(db,env,uid,q.message?.message_id);
   if(data.startsWith('currency_set:')){
     const currency=data.split(':')[1];
@@ -505,7 +490,7 @@ ${short(p.title,100)}
   if(data==='admin_addproduct'){
     if(!isAdmin(env,uid))return;
     await setSession(db,uid,'admin_product');
-    return sendText(env,uid,'➕ لإضافة منتج، أرسل سطراً بالشكل:\n\nاسم المنتج | رقم القسم | السعر بالنجوم | المدة بالأشهر أو - | المخزون أو - | الوصف\n\nيمكن معرفة أرقام الأقسام من لوحة المدير. مثال:\nخدمة تجريبية | 1 | 20 | 1 | 5 | وصف الخدمة\n\nللإلغاء /cancel.');
+    return sendText(env,uid,'➕ لإضافة منتج، أرسل سطراً بالشكل:\n\nاسم المنتج | رقم القسم | سعر المحفظة بالدينار | المدة بالأشهر أو - | المخزون أو - | الوصف\n\nيمكن معرفة أرقام الأقسام من لوحة المدير. مثال:\nخدمة تجريبية | 1 | 12000 | 1 | 5 | وصف الخدمة\n\nللإلغاء /cancel.');
   }
   if(data==='admin_addcategory'){
     if(!isAdmin(env,uid))return;
@@ -556,7 +541,7 @@ export async function processUpdate(db,env,ctx,update){
     const done=await db.prepare('SELECT 1 AS yes FROM processed_updates WHERE update_id=?').bind(update.update_id).first();
     if(done)return;
   }
-  if(update.pre_checkout_query) await handlePreCheckout(db,env,update.pre_checkout_query);
+  if(update.pre_checkout_query) await telegram(env,'answerPreCheckoutQuery',{pre_checkout_query_id:update.pre_checkout_query.id,ok:false,error_message:'تم إيقاف نظام النجوم للطلبات الجديدة. تواصل مع الدعم بشأن الطلبات السابقة.'});
   else if(update.message?.successful_payment) {
     await ensureUser(db,update.message.from);
     await handlePayment(db,env,ctx,update.message);

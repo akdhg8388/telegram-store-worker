@@ -9,7 +9,7 @@ import {processUpdate} from '../src/bot.js';
 const env={ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'TEST_ONLY',STORE_NAME:'My Store',BOT_USERNAME:'MyStoreIQBot',ENABLE_MANUAL_TOPUPS:'false'};
 function fixture(){
   const conn=new DatabaseSync(':memory:');
-  for(const n of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql'])
+  for(const n of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql'])
     conn.exec(readFileSync(new URL('../migrations/'+n,import.meta.url),'utf8'));
   conn.prepare("INSERT INTO users(tg_id,first_name,username) VALUES(991,'Admin','owner'),(101,'Customer','client')").run();
   conn.prepare("INSERT INTO products(category_id,title,price_stars,stock,active) VALUES(1,'متاح الآن',30,8,1),(1,'نفد المخزون',30,0,1),(1,'حسب الطلب',30,NULL,1)").run();
@@ -51,26 +51,23 @@ test('real personal profile uses stored ledger balance, actual orders and referr
     });
  }finally{conn.close()}
 });
-test('catalog and product page show stock quantity and colored status with working refresh callback',async()=>{
+test('catalog and product page show real ready inventory rather than misleading stock alone',async()=>{
  const {conn,db}=fixture();try{await mock(async calls=>{
+    // Legacy stock on its own must not be marketed as instantly deliverable.
     await products(db,env,101);
-    const list=flatten(calls[0]);
-    assert.equal(list.find(b=>b.callback_data==='product:1').style,'success');
-    assert.match(list.find(b=>b.callback_data==='product:1').text,/8/);
+    let list=flatten(calls[0]);
+    assert.equal(list.find(b=>b.callback_data==='product:1').style,'danger');
     assert.equal(list.find(b=>b.callback_data==='product:2').style,'danger');
-    assert.match(list.find(b=>b.callback_data==='product:2').text,/0/);
-    await productView(db,env,101,2);
-    const unavailable=flatten(calls[1]);
-    assert.equal(unavailable.find(b=>b.text.includes('المخزون: 0')).style,'danger');
-    assert.ok(!unavailable.some(b=>b.callback_data==='buy:2'));
-    assert.equal(unavailable.find(b=>b.text.includes('تحديث المخزون')).callback_data,'product:2');
+    conn.prepare("UPDATE products SET price_iqd=5000,fulfillment_mode='shared',delivery_shared_text='demo instructions' WHERE id=1").run();
+    await products(db,env,101);
+    list=flatten(calls[1]);
+    assert.equal(list.find(b=>b.callback_data==='product:1').style,'success');
     await productView(db,env,101,1);
     const available=flatten(calls[2]);
-    assert.equal(available.find(b=>b.text.includes('المخزون: 8')).style,'success');
     assert.equal(available.find(b=>b.callback_data==='buy:1').style,'success');
-    await productView(db,env,101,3);
-    const unlimited=flatten(calls[3]);
-    assert.ok(unlimited.some(b=>b.text.includes('حسب الطلب') && b.style==='success'));
+    assert.equal(available.find(b=>b.text.includes('تحديث المخزون')).callback_data,'product:1');
+    await productView(db,env,101,2);
+    assert.ok(!flatten(calls[3]).some(b=>b.callback_data==='buy:2'));
  });}finally{conn.close()}
 });
 test('native three-line Telegram commands menu has customer commands only; admin scope is distinct',()=>{

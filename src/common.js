@@ -9,7 +9,7 @@ export const backRow = () => [button('↩️ الرجوع للرئيسية', 'ho
 export const moneyMethods = { asiacell: 'آسيا سيل', zaincash: 'زين كاش', zain_balance: 'رصيد زين', superqi: 'سوبر كي', binance: 'Binance' };
 export const orderNames = {
   awaiting_admin: '⏳ بانتظار موافقة المدير',
-  awaiting_payment: '💳 بانتظار الدفع بالنجوم',
+  awaiting_payment: '⏳ طلب قديم بانتظار التسوية',
   paid_pending_delivery: '📦 مدفوع — قيد التجهيز',
   delivered: '✅ مكتمل', rejected: '❌ مرفوض', refunded: '↩️ مسترد'
 };

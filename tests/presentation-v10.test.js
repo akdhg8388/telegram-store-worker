@@ -9,7 +9,7 @@ import {sendText,sendOrEditText} from '../src/telegram.js';
 
 function fixture(){
  const conn=new DatabaseSync(':memory:');
- for(let i=1;i<=8;i++)conn.exec(readFileSync(new URL(`../migrations/000${i}_${['init','admin_controls','reliability','reference_catalog','persistent_navigation','wallet_checkout','support_moderation_topup','custom_ui_customer_inbox_cleanup'][i-1]}.sql`,import.meta.url),'utf8'));
+ for(let i=1;i<=9;i++)conn.exec(readFileSync(new URL(`../migrations/000${i}_${['init','admin_controls','reliability','reference_catalog','persistent_navigation','wallet_checkout','support_moderation_topup','custom_ui_customer_inbox_cleanup','wallet_auto_delivery'][i-1]}.sql`,import.meta.url),'utf8'));
  conn.prepare("INSERT INTO users(tg_id,first_name,currency_preference) VALUES (101,'مهند','IQD'),(102,'Second','USD'),(991,'Owner','IQD')").run();
  conn.prepare("INSERT INTO bot_settings(key,value) VALUES('usd_rate_iqd','1520')").run();
  conn.prepare("INSERT INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key) VALUES (101,912000,'topup','deposit-101'),(102,912000,'topup','deposit-102')").run();
