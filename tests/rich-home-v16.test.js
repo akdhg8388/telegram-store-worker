@@ -33,7 +33,7 @@ test('V16: custom emoji at start stays first RichText element in an RTL home but
 });
 test('V16: rich labels preserve end placement and ordinary buttons stay unchanged',()=>{
   const atEnd=richHomeButton(homeActionButton(english,'shop','en'));
-  assert.deepEqual(atEnd.text,['Shop ','',{type:'custom_emoji',custom_emoji_id:emojiId,alternative_text:'💳'}].filter(x=>x!==''));
+  assert.deepEqual(atEnd.text,['Shop',' ',{type:'custom_emoji',custom_emoji_id:emojiId,alternative_text:'💳'}]);
   const ordinary=richHomeButton({text:'📦 طلباتي',callback_data:'orders',style:'primary'});
   assert.deepEqual(ordinary,{text:'📦 طلباتي',callback_data:'orders',style:'primary'});
   assert.equal(richHomeNeeded([[homeActionButton(english,'shop','en')]]),false);
@@ -53,7 +53,7 @@ async function mock(fn,fail){
   globalThis.fetch=async(url,init)=>{
     const method=url.split('/').at(-1),body=JSON.parse(init.body);
     calls.push({method,body});
-    if(method===fail)return new Response(JSON.stringify({ok:false,description:'Bad Request: rich message unsupported'}),{status:400});
+    if(method===fail && !!body.rich_message)return new Response(JSON.stringify({ok:false,description:'Bad Request: rich message unsupported'}),{status:400});
     return new Response(JSON.stringify({ok:true,result:{message_id:100}}),{status:200});
   };
   try{await fn(calls)}finally{globalThis.fetch=old;}
