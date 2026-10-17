@@ -5,7 +5,7 @@ export const positiveInt = value => /^\d+$/.test(String(value)) && Number.isSafe
 export const button = (text, callback_data, style) => ({ text, callback_data, ...(style ? { style } : {}) });
 export const urlButton = (text, url) => ({ text, url });
 export const keyboard = (...rows) => ({ inline_keyboard: rows.filter(x => x?.length) });
-export const backRow = () => [button('⬅️ الرجوع للرئيسية', 'home')];
+export const backRow = () => [button('↩️ الرجوع للرئيسية', 'home', 'danger')];
 export const moneyMethods = { asiacell: 'آسيا سيل', zaincash: 'زين كاش', superqi: 'سوبر كي' };
 export const orderNames = {
   awaiting_admin: '⏳ بانتظار موافقة المدير',

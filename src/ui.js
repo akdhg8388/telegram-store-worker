@@ -6,9 +6,9 @@ import {getSetting,storeAcceptsOrders} from './settings.js';
 export async function home(db,env,uid,messageId=null) {
   const user = await getUser(db,uid);
   const featured=(await db.prepare('SELECT id,title,price_stars FROM products WHERE active=1 AND featured=1 ORDER BY id DESC LIMIT 2').all()).results??[];
-  const rows = featured.map(p=>[button(`🌟 ${short(p.title,25)} — ${formatStars(p.price_stars)}`,`product:${p.id}`)]);
-  rows.push([button('🛍️ المتجر','categories','primary'),button('💎 المنتجات المميزة','featured')]);
-  rows.push([button('👛 محفظتي','wallet'),button('👤 ملفي الشخصي','profile')]);
+  const rows = featured.map(p=>[button(`🌟 ${short(p.title,25)} — ${formatStars(p.price_stars)}`,`product:${p.id}`,'success')]);
+  rows.push([button('🛍️ المتجر','categories','success'),button('💎 المنتجات المميزة','featured','primary')]);
+  rows.push([button('👛 محفظتي','wallet','success'),button('👤 ملفي الشخصي','profile','primary')]);
   rows.push([button('📦 طلباتي','orders'),button('📜 سجل العمليات','transactions')]);
   rows.push([button('👥 الإحالات','referrals'),button('🌐 اللغة','language')]);
   rows.push([button('🎧 الدعم','support'),button('📢 الأخبار','news')]);
@@ -29,8 +29,8 @@ ${open?'💎 شراء الخدمات الرقمية يتم عبر Telegram Stars
 export async function categories(db,env,uid,messageId=null) {
   const cats=await listCategories(db);
   const rows=[];
-  for(let i=0;i<cats.length;i+=2) rows.push(cats.slice(i,i+2).map(c=>button(`${c.emoji} ${short(c.title,22)}`,`category:${c.id}:0`)));
-  rows.push([button('🔎 البحث','search'),button('🛍️ جميع المنتجات','products:0')]);
+  for(let i=0;i<cats.length;i+=3) rows.push(cats.slice(i,i+3).map(c=>button(`${c.emoji} ${short(c.title,16)}`,`category:${c.id}:0`,'primary')));
+  rows.push([button('🔎 البحث','search','primary'),button('🛍️ جميع المنتجات','products:0','success')]);
   rows.push(backRow());
   return sendOrEditText(env,uid,'🛍️ أقسام المتجر\n\nاختر القسم الذي تريده:',keyboard(...rows),messageId);
 }
@@ -67,13 +67,15 @@ export async function profile(db,env,uid,messageId=null){
   const count=await db.prepare("SELECT count(*) n FROM orders WHERE user_tg_id=? AND status='delivered'").bind(uid).first();
   const referrals=await db.prepare('SELECT count(*) n FROM referrals WHERE referrer_tg_id=?').bind(uid).first();
   return sendOrEditText(env,uid,`👤 الملف الشخصي\n\nالاسم: ${short(u?.first_name,120)}\nالمعرف: ${u?.username?'@'+u.username:'غير موجود'}\nTelegram ID: ${uid}\n👛 الرصيد الداخلي: ${formatIQD(u?.wallet_balance_iqd)}\n🛍️ المشتريات المكتملة: ${count?.n||0}\n👥 الإحالات: ${referrals?.n||0}\n\nتنبيه: الرصيد الداخلي ليس بديلاً عن Telegram Stars للسلع الرقمية.`, keyboard(
-    [button('👛 محفظتي','wallet'),button('📦 طلباتي','orders')],
-    [button('📜 سجل العمليات','transactions'),button('💗 المفضلة','favorites')],backRow()),messageId);
+    [button('👛 محفظتي','wallet','success')],
+    [button('📦 طلباتي','orders','primary')],
+    [button('📜 سجل العمليات','transactions','primary')],
+    [button('💗 المفضلة','favorites','primary')],backRow()),messageId);
 }
 export async function wallet(db,env,uid,messageId=null){
   const u=await getUser(db,uid);
   return sendOrEditText(env,uid,`👛 محفظتي\n\n💰 الرصيد الداخلي: ${formatIQD(u?.wallet_balance_iqd)}\n\n⚠️ رصيد المحفظة لا يُستخدم لدفع ثمن الاشتراكات والخدمات الرقمية داخل البوت؛ تلك المدفوعات تتم عبر Telegram Stars.`,keyboard(
-    [button('💳 طلب شحن يدوي','topup')],
+    ...(env.ENABLE_MANUAL_TOPUPS==='true' ? [[button('💳 طلب شحن يدوي','topup','success')]] : []),
     [button('📜 سجل المحفظة','transactions'),button('👤 الملف الشخصي','profile')],backRow()),messageId);
 }
 export async function transactions(db,env,uid,messageId=null){

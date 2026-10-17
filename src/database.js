@@ -17,7 +17,7 @@ export async function getSession(db, uid) {
 }
 export async function clearSession(db, uid) { return db.prepare('DELETE FROM user_sessions WHERE user_tg_id=?').bind(uid).run(); }
 export async function listCategories(db) {
-  const r=await db.prepare('SELECT * FROM categories WHERE active=1 ORDER BY id').all(); return r.results??[];
+  const r=await db.prepare('SELECT * FROM categories WHERE active=1 ORDER BY sort_order,id').all(); return r.results??[];
 }
 export async function listProducts(db, page=0, categoryId=null, search=null) {
   const limit=10, offset=Math.max(0,page)*limit;
