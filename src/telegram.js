@@ -58,6 +58,30 @@ export async function sendOrEditText(env, chat_id, text, reply_markup, message_i
     throw error;
   }
 }
+// Rich home is opt-in by the position of an Arabic custom emoji. On a Bot API
+// 400 (unsupported rich block/emoji), preserve every original V15 button.
+// Transient failures (network, 429, 5xx) are NOT retried as a second request.
+export async function sendOrEditRichHome(env,chat_id,rich_message,text,reply_markup,message_id,options={}){
+  const editing=Number.isSafeInteger(message_id)&&message_id>0;
+  const fallback=()=>sendOrEditText(env,chat_id,text,reply_markup,message_id,options);
+  const invalidRich=err=>/Telegram (?:sendRichMessage|editMessageText): 400:/.test(String(err));
+  try{
+    return await telegram(env,editing?'editMessageText':'sendRichMessage',{
+      chat_id,...(editing?{message_id}:{}),rich_message
+    });
+  }catch(error){
+    if(/message is not modified/i.test(String(error)))return null;
+    if(editing && /message to edit not found|message can't be edited|message identifier is not specified/i.test(String(error))){
+      try{return await telegram(env,'sendRichMessage',{chat_id,rich_message});}
+      catch(sendError){
+        if(invalidRich(sendError))return sendText(env,chat_id,text,reply_markup,options);
+        throw sendError;
+      }
+    }
+    if(invalidRich(error))return fallback();
+    throw error;
+  }
+}
 export const answerCallback = (env, callback_query_id, text) => telegram(env,'answerCallbackQuery',{
   callback_query_id, ...(text ? {text: String(text).slice(0,190)} : {})
 });

@@ -50,10 +50,22 @@ test('custom emoji pasted at beginning OR end of an Arabic button name is saved 
       assert.equal(await getSetting(db,homeSettingKey('shop','icon')),emojiId);
       assert.equal(await getSetting(db,homeSettingKey('shop','inline_ar')),emoji);
       await home(db,env,991);
-      const button=homeBtn(calls.at(-1),'categories');
-      assert.equal(button.text,'متجر'); // Telegram shows the custom icon before the text.
-      assert.equal(button.icon_custom_emoji_id,emojiId);
-      assert.equal(button._emoji_fallback_text,undefined); // Internal data never goes over API.
+      const sent=calls.at(-1);
+      if(title.startsWith(emoji)){
+        assert.equal(sent.method,'sendRichMessage');
+        const rows=sent.body.rich_message.blocks.filter(x=>x.type==='buttons');
+        const button=rows.flatMap(x=>x.buttons).find(x=>x.callback_data==='categories');
+        assert.equal(sent.body.rich_message.is_rtl,true);
+        assert.deepEqual(button.text[0],{type:'custom_emoji',custom_emoji_id:emojiId,alternative_text:emoji});
+        assert.equal(button.text.at(-1),'متجر');
+        assert.equal(button.icon_custom_emoji_id,undefined);
+      }else{
+        assert.equal(sent.method,'sendMessage');
+        const button=homeBtn(sent,'categories');
+        assert.equal(button.text,'متجر'); // Legacy fallback still works.
+        assert.equal(button.icon_custom_emoji_id,emojiId);
+        assert.equal(button._emoji_fallback_text,undefined);
+      }
     }
   })}finally{conn.close()}
 });
