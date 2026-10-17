@@ -10,7 +10,7 @@ import {isTopupEnabled} from '../src/wallet.js';
 const env={ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'FAKE_TEST_BOT_TOKEN',ENABLE_MANUAL_TOPUPS:'false',STORE_NAME:'My Store'};
 function fixture(){
   const conn=new DatabaseSync(':memory:');
-  for(const n of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql'])
+  for(const n of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql'])
     conn.exec(readFileSync(new URL('../migrations/'+n,import.meta.url),'utf8'));
   conn.prepare("INSERT INTO users(tg_id,first_name) VALUES(991,'Owner'),(101,'Client')").run();
   const db={prepare(sql){const stmt=conn.prepare(sql);let args=[];const wrapper={
@@ -58,7 +58,7 @@ test('owner sees a clear empty topup requests page instead of ambiguous permissi
     const screen=calls.find(c=>c.method==='editMessageText');
     assert.equal(screen.body.message_id,333);
     assert.match(screen.body.text,/لا توجد طلبات شحن معلّقة/);
-    assert.ok(buttons(screen).some(b=>b.callback_data==='admin_topup_setup'));
+    assert.ok(buttons(screen).some(b=>b.callback_data==='admin_topups_done'));
   });}finally{conn.close()}
 });
 
@@ -106,11 +106,15 @@ test('pending receipt becomes reviewable by owner; no unauthorized acceptance',a
     conn.prepare("INSERT INTO topup_requests(user_tg_id,method,amount_iqd,transfer_reference) VALUES (101,'zain_balance',15200,'evidence-101')").run();
     await recordTelegram(async calls=>{
       await update(db,32,991,'admin_topups',404);
-      assert.ok(calls.some(c=>c.method==='editMessageText'&&c.body.text.includes('طلبات الشحن المعلّقة')));
-      const review=calls.find(c=>c.method==='sendMessage'&&c.body.text?.includes('طلب شحن #1'));
+      assert.ok(calls.some(c=>c.method==='editMessageText'&&c.body.text.includes('معالجة طلبات الشحن')));
+      const review=calls.find(c=>c.method==='editMessageText'&&c.body.text?.includes('معالجة طلبات الشحن'));
       assert.ok(review);
-      assert.ok(buttons(review).some(b=>b.callback_data==='topup_approve:1'));
-      assert.ok(buttons(review).some(b=>b.callback_data==='topup_reject:1'));
+      assert.ok(buttons(review).some(b=>b.callback_data==='topup_detail:1'));
+      await update(db,34,991,'topup_detail:1');
+      const detail=calls.find(c=>c.method==='sendMessage'&&c.body.text?.includes('طلب شحن #1'));
+      assert.ok(detail);
+      assert.ok(buttons(detail).some(b=>b.callback_data==='topup_approve:1'));
+      assert.ok(buttons(detail).some(b=>b.callback_data==='topup_reject:1'));
       await update(db,33,101,'topup_approve:1');
       assert.equal(conn.prepare('SELECT status FROM topup_requests WHERE id=1').get().status,'pending');
       assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,0);

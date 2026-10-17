@@ -156,8 +156,15 @@ export async function topupEvidence(db,env,uid,quote,method,messageId=null){
   return sendOrEditText(env,uid,`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`,keyboard([button('↩️ إلغاء الطلب','topup_cancel','danger')]),messageId);
 }
 export async function topupConfirm(db,env,uid,payload,messageId=null){
-  const quote=payload;
-  return sendOrEditText(env,uid,`📋 مراجعة طلب الشحن\n\n💰 المبلغ: ${formatQuote(quote)}\n💸 الوسيلة: ${moneyMethods[payload.method]}\n🔢 رقم العملية: ${short(payload.reference||'غير متوفر',160)}\n📷 صورة الإثبات: ${payload.proofFileId?'مرفقة':'غير مرفقة'}\n\n✅ عند التأكيد يصل الطلب للمدير للمراجعة، ولن يتغير رصيدك قبل قبوله.\nيمكنك إضافة صورة أو رقم آخر قبل التأكيد.`,keyboard(
+  return sendOrEditText(env,uid,`📋 مراجعة طلب شحن المحفظة
+
+💰 المبلغ: ${formatQuote(payload)}
+💳 وسيلة الدفع: ${moneyMethods[payload.method]}
+🔢 رقم العملية: ${short(payload.reference||'غير متوفر',160)}
+📸 إثبات التحويل: ${payload.proofFileId?'✅ مرفق':'غير مرفق'}
+
+يرجى التأكد من صحة البيانات قبل إرسال الطلب.
+🔔 ستصلك رسالة عند تحديث حالة الطلب، ويمكنك متابعته من قسم 📦 طلباتي.`,keyboard(
     [button('✅ تأكيد وإرسال الطلب',`topup_submit:${payload.nonce}`,'success')],
     [button('❌ إلغاء','topup_cancel','danger')]),messageId);
 }

@@ -3,6 +3,7 @@ import {sendText,sendOrEditText} from './telegram.js';
 import {setSession,clearSession,audit,getUser} from './database.js';
 import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './settings.js';
 import {usdRate,receiverFor} from './wallet.js';
+import {restrictionLabel} from './moderation.js';
 
 const adminBack=[button('🛡️ لوحة المدير','admin')];
 const backTo=(destination)=>[button('⬅️ رجوع',destination)];
@@ -125,10 +126,10 @@ async function userLookup(db,env,uid,input,messageId=null){
 الطلبات: ${orders.n}
 طلبات الشحن: ${topups.n}
 تاريخ التسجيل: ${u.joined_at}
-الوضع: ${u.is_blocked?'⛔ محظور':'✅ نشط'}
+الوضع: ${restrictionLabel(u)}
 
 يمكن إرسال رد خاص عبر: /reply ${userId} نص الرسالة`,keyboard(
-    [button(u.is_blocked?'✅ رفع الحظر':'⛔ حظر الحساب',`admin_user_toggle:${userId}`,u.is_blocked?'success':'danger')],adminBack));
+    [button('👤 إدارة الحظر والتعليق',`admin_user:${userId}`,'primary')],adminBack));
 }
 
 // A single guided page avoids making the owner search through pages of settings.

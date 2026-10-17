@@ -60,5 +60,5 @@ export function quoteOfRecord(row){return {
   amountIqd:row.amount_iqd,rate:row.quoted_rate_iqd||null
 };}
 export function topupStatusMessage(row){
-  return `💳 طلب شحن #${row.id}\n\n💰 ${formatQuote(quoteOfRecord(row))}\n💸 الطريقة: ${moneyMethods[row.method]||row.method}\n📌 الحالة: ${topupStatus(row.status)}\n🗓️ وقت الطلب: ${baghdadDate(row.created_at)}${row.decided_at?'\n🕒 وقت القرار: '+baghdadDate(row.decided_at):''}`;
+  return `💳 طلب شحن #${row.id}\n\n💰 المطلوب: ${formatQuote(quoteOfRecord(row))}${row.credited_amount_iqd!=null?'\n✅ المضاف فعلياً: '+formatIQD(row.credited_amount_iqd):''}\n💸 الطريقة: ${moneyMethods[row.method]||row.method}\n📌 الحالة: ${topupStatus(row.status)}\n🗓️ وقت الطلب: ${baghdadDate(row.created_at)}${row.decided_at?'\n🕒 وقت القرار: '+baghdadDate(row.decided_at):''}`;
 }

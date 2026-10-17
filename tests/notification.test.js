@@ -7,7 +7,7 @@ import {flushOutbox,queueNotification} from '../src/telegram.js';
 
 function setup(){
   const conn=new DatabaseSync(':memory:');
-  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql'])
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql'])
     conn.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   const db={
     prepare(sql){
@@ -24,7 +24,7 @@ function setup(){
   return {conn,db};
 }
 
-test('admin support reply is queued and delivered instead of failing',async()=>{
+test('legacy reply command points owner to audited support inbox',async()=>{
   const {conn,db}=setup();
   const previousFetch=globalThis.fetch;
   const requests=[];
@@ -38,8 +38,8 @@ test('admin support reply is queued and delivered instead of failing',async()=>{
       {waitUntil(p){background.push(p)}},
       {update_id:777,message:{from:{id:991,first_name:'Owner'},chat:{id:991,type:'private'},text:'/reply 101 تم الرد على طلبك'}});
     await Promise.all(background);
-    assert.equal(conn.prepare('SELECT count(*) n FROM notification_outbox').get().n,1);
-    assert.ok(requests.some(({body})=>String(body.chat_id)==='101' && body.text.includes('تم الرد على طلبك')));
+    assert.equal(conn.prepare('SELECT count(*) n FROM notification_outbox').get().n,0);
+    assert.ok(requests.some(({body})=>String(body.chat_id)==='991' && body.text.includes('رسائل الدعم الفني')));
   } finally {globalThis.fetch=previousFetch;conn.close();}
 });
 

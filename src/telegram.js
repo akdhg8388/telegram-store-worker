@@ -32,12 +32,13 @@ export async function sendOrEditText(env, chat_id, text, reply_markup, message_i
 export const answerCallback = (env, callback_query_id, text) => telegram(env,'answerCallbackQuery',{
   callback_query_id, ...(text ? {text: String(text).slice(0,190)} : {})
 });
-export async function queueNotification(db, method, params) {
-  await db.prepare('INSERT INTO notification_outbox(method,payload) VALUES (?,?)').bind(method, JSON.stringify(params)).run();
+export async function queueNotification(db, method, params, metadata={}) {
+  await db.prepare('INSERT INTO notification_outbox(method,payload,support_message_id,topup_request_id) VALUES (?,?,?,?)')
+    .bind(method,JSON.stringify(params),metadata.supportMessageId||null,metadata.topupRequestId||null).run();
 }
 export async function flushOutbox(db, env, limit = 10) {
   const now = Math.floor(Date.now()/1000);
-  const rows = await db.prepare(`SELECT id,method,payload,attempts FROM notification_outbox
+  const rows = await db.prepare(`SELECT id,method,payload,attempts,support_message_id,topup_request_id FROM notification_outbox
     WHERE (state='pending' AND next_attempt_at <= ?) OR (state='sending' AND lease_until < ?) ORDER BY id LIMIT ?`)
     .bind(now, now, limit).all();
   for(const item of rows.results ?? []) {
@@ -46,7 +47,15 @@ export async function flushOutbox(db, env, limit = 10) {
       .bind(now+90,item.id,now,now).run();
     if(!claim.meta?.changes) continue;
     try {
-      await telegram(env, item.method, JSON.parse(item.payload));
+      const sent=await telegram(env, item.method, JSON.parse(item.payload));
+      // Save the concrete Telegram notification message ID so old buttons can be retired
+      // and support message copies can be deleted when Telegram permits.
+      if(Number.isSafeInteger(sent?.message_id)){
+        if(item.topup_request_id)await db.prepare('UPDATE topup_requests SET admin_notice_message_id=? WHERE id=?')
+          .bind(sent.message_id,item.topup_request_id).run();
+        if(item.support_message_id)await db.prepare('UPDATE support_messages SET admin_notice_message_id=? WHERE id=?')
+          .bind(sent.message_id,item.support_message_id).run();
+      }
       await db.prepare("UPDATE notification_outbox SET state='sent' WHERE id=?").bind(item.id).run();
     } catch(error) {
       console.error('Outbox delivery error', item.id, String(error));

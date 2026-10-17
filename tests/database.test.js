@@ -6,7 +6,7 @@ import { formatIQD,formatStars,positiveInt,isAdmin,button } from '../src/common.
 
 function freshDb(){
   const db=new DatabaseSync(':memory:');
-  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql'])
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql'])
     db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   db.prepare('INSERT INTO users(tg_id,first_name) VALUES (?,?)').run(101,'Ali');
   db.prepare("INSERT INTO products(category_id,title,price_stars,stock) VALUES (1,'Premium',20,2)").run();
@@ -14,7 +14,7 @@ function freshDb(){
 }
 
 test('database initializes with categories, no fabricated products',()=>{
-  const db=new DatabaseSync(':memory:');for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql'])
+  const db=new DatabaseSync(':memory:');for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql'])
     db.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   assert.equal(db.prepare('SELECT count(*) n FROM products').get().n,0);
   assert.ok(db.prepare('SELECT count(*) n FROM categories').get().n>=8);

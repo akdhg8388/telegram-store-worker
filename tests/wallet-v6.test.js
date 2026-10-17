@@ -7,10 +7,10 @@ import {handleAdminCallback} from '../src/admin-controls.js';
 import {flushOutbox} from '../src/telegram.js';
 import {formatUSD,formatQuote,quoteFromUSD,quoteMinor,parseCustomMinor,usdRate,baghdadDate} from '../src/wallet.js';
 
-const migrations=['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql'];
+const migrations=['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql'];
 function setup(migrate=true){
   const conn=new DatabaseSync(':memory:');
-  for(const file of migrate?migrations:migrations.slice(0,-1))
+  for(const file of migrate?migrations:migrations.slice(0,-2))
     conn.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   const db={
     prepare(sql){
@@ -147,7 +147,7 @@ test('photo and transfer reference request is confirmed, appears in orders, appr
       assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,0);
       assert.ok(calls.some(c=>String(c.body.text||'').includes('طلبات شحن المحفظة')));
       assert.ok(calls.some(c=>String(c.body.text||'').includes('سُجل طلبك بالفعل')));
-      await runUpdates(db,[cb(109,'c7',991,'topup_approve:1',881),cb(110,'c8',991,'topup_approve:1',882)]);
+      await runUpdates(db,[cb(109,'c7',991,'topup_approve:1',881),cb(110,'c8',991,'topup_commit:1:32500',882),cb(111,'c9',991,'topup_commit:1:32500',882)]);
       row=conn.prepare('SELECT * FROM topup_requests WHERE id=1').get();
       assert.equal(row.status,'approved');
       assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,32500);
@@ -233,7 +233,7 @@ test('admin may approve an already submitted request even after disabling new to
     settings(conn);
     conn.prepare("INSERT INTO topup_requests(user_tg_id,method,amount_iqd,transfer_reference) VALUES(101,'superqi',50000,'old-legit-transfer')").run();
     await withTelegram(async()=>{
-      await runUpdates(db,[cb(1200,'admin',991,'topup_approve:1')]);
+      await runUpdates(db,[cb(1200,'admin',991,'topup_approve:1'),cb(1201,'commit',991,'topup_commit:1:50000')]);
       assert.equal(conn.prepare('SELECT status FROM topup_requests WHERE id=1').get().status,'approved');
       assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,50000);
     });
