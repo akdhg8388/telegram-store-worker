@@ -1,0 +1,18 @@
+{
+  "name": "telegram-store-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Arabic Telegram digital store running on Cloudflare Workers and D1",
+  "scripts": {
+    "test": "node --experimental-sqlite --test",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply telegram_store --local",
+    "db:remote": "wrangler d1 migrations apply telegram_store --remote",
+    "webhook": "node scripts/set-webhook.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "telegram-store-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "telegram_store",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "STORE_NAME": "متجري الرقمي",
+    "BOT_USERNAME": "",
+    "SUPPORT_URL": "",
+    "NEWS_URL": "",
+    "ASIACELL_RECEIVER": "",
+    "ZAINCASH_RECEIVER": "",
+    "SUPERQI_RECEIVER": "",
+    "ENABLE_MANUAL_TOPUPS": "false"
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}

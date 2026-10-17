@@ -1,0 +1,95 @@
+import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton} from './common.js';
+import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
+import {sendText} from './telegram.js';
+
+export async function home(db,env,uid) {
+  const user = await getUser(db,uid);
+  const featured=(await db.prepare('SELECT id,title,price_stars FROM products WHERE active=1 AND featured=1 ORDER BY id DESC LIMIT 2').all()).results??[];
+  const rows = featured.map(p=>[button(`🌟 ${short(p.title,25)} — ${formatStars(p.price_stars)}`,`product:${p.id}`)]);
+  rows.push([button('🛍️ المتجر','categories','primary'),button('💎 المنتجات المميزة','featured')]);
+  rows.push([button('👛 محفظتي','wallet'),button('👤 ملفي الشخصي','profile')]);
+  rows.push([button('📦 طلباتي','orders'),button('📜 سجل العمليات','transactions')]);
+  rows.push([button('👥 الإحالات','referrals'),button('🌐 اللغة','language')]);
+  rows.push([button('🎧 الدعم','support'),button('📢 الأخبار','news')]);
+  if (env.RESELLER_URL?.startsWith('https://')) rows.push([urlButton('🔑 API Reseller',env.RESELLER_URL)]);
+  const text=`🌟 مرحباً بك في ${env.STORE_NAME||'متجري الرقمي'}\n\n👤 ${short(user?.first_name||'صديقنا',100)}\nاختر الخدمة المطلوبة من القائمة أدناه.\n\n💳 شراء الخدمات الرقمية يتم عبر Telegram Stars، مع موافقة المدير على الطلب.`;
+  return sendText(env,uid,text,keyboard(...rows));
+}
+export async function categories(db,env,uid) {
+  const cats=await listCategories(db);
+  const rows=[];
+  for(let i=0;i<cats.length;i+=2) rows.push(cats.slice(i,i+2).map(c=>button(`${c.emoji} ${short(c.title,22)}`,`category:${c.id}:0`)));
+  rows.push([button('🔎 البحث','search'),button('🛍️ جميع المنتجات','products:0')]);
+  rows.push(backRow());
+  return sendText(env,uid,'🛍️ أقسام المتجر\n\nاختر القسم الذي تريده:',keyboard(...rows));
+}
+export async function products(db,env,uid,page=0,categoryId=null,query=null,featuredOnly=false) {
+  let records;
+  if(featuredOnly){records=(await db.prepare('SELECT * FROM products WHERE active=1 AND featured=1 ORDER BY id DESC LIMIT 10').all()).results??[];}
+  else records=await listProducts(db,page,categoryId,query);
+  const rows=records.map(p=>[button(`${short(p.title,33)} — ${formatStars(p.price_stars)}${p.stock===0?' ❌':''}`,`product:${p.id}`)]);
+  if(!featuredOnly && !query){
+    const pages=[];
+    const prefix=categoryId?`category:${categoryId}`:'products';
+    if(page>0)pages.push(button('⬅️ السابق',`${prefix}:${page-1}`));
+    if(records.length===10)pages.push(button('التالي ➡️',`${prefix}:${page+1}`));
+    if(pages.length)rows.push(pages);
+  }
+  rows.push([button('🔎 بحث','search'),button('🛍️ الأقسام','categories')]);
+  rows.push(backRow());
+  return sendText(env,uid,records.length?'🛍️ المنتجات المتوفرة في المتجر:':'لا توجد منتجات منشورة هنا حالياً.',keyboard(...rows));
+}
+export async function productView(db,env,uid,id){
+  const p=await getProduct(db,id);
+  if(!p)return sendText(env,uid,'هذا المنتج غير متوفر حالياً.',keyboard([button('🛍️ المتجر','categories')],backRow()));
+  const fav=await db.prepare('SELECT 1 AS yes FROM favorites WHERE user_tg_id=? AND product_id=?').bind(uid,id).first();
+  const desc=short(p.description||'لا يوجد وصف إضافي.',1300);
+  const text=`🛍️ ${short(p.title,150)}\n\n${desc}\n\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب تفاصيل الخدمة'}\n💰 السعر: ${formatStars(p.price_stars)}\n📦 المخزون: ${p.stock===null?'متاح حسب التجهيز':p.stock>0?p.stock:'غير متوفر'}\n\n✅ تنفيذ الشراء يحتاج موافقة المدير، ثم الدفع عبر Telegram Stars.`;
+  return sendText(env,uid,text,keyboard(
+    p.stock!==0?[button('🛒 طلب الشراء',`buy:${id}`,'success')]:[],
+    [button(fav?'💔 إزالة من المفضلة':'💗 إضافة للمفضلة',`favorite:${id}`)],
+    [button('🔄 تحديث',`product:${id}`),button('🛍️ الأقسام','categories')],backRow()));
+}
+export async function profile(db,env,uid){
+  const u=await getUser(db,uid);
+  const count=await db.prepare("SELECT count(*) n FROM orders WHERE user_tg_id=? AND status='delivered'").bind(uid).first();
+  const referrals=await db.prepare('SELECT count(*) n FROM referrals WHERE referrer_tg_id=?').bind(uid).first();
+  return sendText(env,uid,`👤 الملف الشخصي\n\nالاسم: ${short(u?.first_name,120)}\nالمعرف: ${u?.username?'@'+u.username:'غير موجود'}\nTelegram ID: ${uid}\n👛 الرصيد الداخلي: ${formatIQD(u?.wallet_balance_iqd)}\n🛍️ المشتريات المكتملة: ${count?.n||0}\n👥 الإحالات: ${referrals?.n||0}\n\nتنبيه: الرصيد الداخلي ليس بديلاً عن Telegram Stars للسلع الرقمية.`, keyboard(
+    [button('👛 محفظتي','wallet'),button('📦 طلباتي','orders')],
+    [button('📜 سجل العمليات','transactions'),button('💗 المفضلة','favorites')],backRow()));
+}
+export async function wallet(db,env,uid){
+  const u=await getUser(db,uid);
+  return sendText(env,uid,`👛 محفظتي\n\n💰 الرصيد الداخلي: ${formatIQD(u?.wallet_balance_iqd)}\n\n⚠️ رصيد المحفظة لا يُستخدم لدفع ثمن الاشتراكات والخدمات الرقمية داخل البوت؛ تلك المدفوعات تتم عبر Telegram Stars.`,keyboard(
+    [button('💳 طلب شحن يدوي','topup')],
+    [button('📜 سجل المحفظة','transactions'),button('👤 الملف الشخصي','profile')],backRow()));
+}
+export async function transactions(db,env,uid){
+  const entries=await ledger(db,uid);
+  const text=entries.length?entries.map(e=>`#${e.id} | ${e.delta_iqd>0?'+':''}${formatIQD(e.delta_iqd)} | ${e.kind} | ${e.created_at}`).join('\n'):'لا توجد عمليات داخلية مسجلة حتى الآن.';
+  return sendText(env,uid,`📜 سجل المحفظة\n\n${text}`,keyboard(backRow()));
+}
+export async function orders(db,env,uid){
+  const items=await listOrders(db,uid);
+  const txt=items.length?items.map(o=>`#${o.id} | ${short(o.title,36)}\n${formatStars(o.total_stars)} | ${orderNames[o.status]||o.status}`).join('\n\n'):'لم تنشئ أي طلبات بعد.';
+  const rows=items.filter(o=>o.status==='awaiting_payment').slice(0,5).map(o=>[button(`💳 ادفع للطلب #${o.id}`,`pay:${o.id}`)]);
+  rows.push(backRow());
+  return sendText(env,uid,`📦 طلباتي\n\n${txt}`,keyboard(...rows));
+}
+export async function favorites(db,env,uid){
+  const items=(await db.prepare('SELECT p.id,p.title,p.price_stars FROM favorites f JOIN products p ON p.id=f.product_id WHERE f.user_tg_id=? AND p.active=1 ORDER BY p.id DESC LIMIT 20').bind(uid).all()).results??[];
+  return sendText(env,uid,items.length?'💗 منتجاتك المفضلة:':'ليس لديك منتجات مفضلة.',keyboard(
+    ...items.map(p=>[button(`${short(p.title,35)} — ${formatStars(p.price_stars)}`,`product:${p.id}`)]),backRow()));
+}
+export async function topupMethods(env,uid){
+  return sendText(env,uid,'💳 طلب شحن المحفظة\n\nاختر وسيلة الشحن اليدوي:',keyboard(
+    [button('📱 آسيا سيل','topup_method:asiacell')],
+    [button('💰 زين كاش','topup_method:zaincash')],
+    [button('🏦 سوبر كي','topup_method:superqi')],backRow()));
+}
+export async function topupAmounts(env,uid,method){
+  const receiver={asiacell:env.ASIACELL_RECEIVER,zaincash:env.ZAINCASH_RECEIVER,superqi:env.SUPERQI_RECEIVER}[method];
+  return sendText(env,uid,`💳 الشحن عبر ${moneyMethods[method]}\n\nبيانات الاستلام: ${receiver||'يرجى التواصل مع المدير للحصول عليها'}\n\nيرجى التحقق من وصول المبلغ إلى الحساب الصحيح. اختر مبلغ الشحن المطلوب:`, keyboard(
+    [button('10,000 د.ع',`topup_amount:${method}:10000`),button('25,000 د.ع',`topup_amount:${method}:25000`)],
+    [button('50,000 د.ع',`topup_amount:${method}:50000`),button('✍️ مبلغ مخصص',`topup_custom:${method}`)],backRow()));
+}
