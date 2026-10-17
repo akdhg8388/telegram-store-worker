@@ -9,7 +9,7 @@ import {ensureUser} from '../src/database.js';
 import {updateBotProfilePicture} from '../src/bot-profile.js';
 
 const env={ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'FAKE_TOKEN',STORE_NAME:'My Store'};
-const migrations=['0001_init','0002_admin_controls','0003_reliability','0004_reference_catalog','0005_persistent_navigation','0006_wallet_checkout','0007_support_moderation_topup','0008_custom_ui_customer_inbox_cleanup','0009_wallet_auto_delivery'];
+const migrations=['0001_init','0002_admin_controls','0003_reliability','0004_reference_catalog','0005_persistent_navigation','0006_wallet_checkout','0007_support_moderation_topup','0008_custom_ui_customer_inbox_cleanup','0009_wallet_auto_delivery','0010_purchase_views_and_unique_codes'];
 function fixture(){
  const conn=new DatabaseSync(':memory:');
  for(const name of migrations)conn.exec(readFileSync(new URL('../migrations/'+name+'.sql',import.meta.url),'utf8'));

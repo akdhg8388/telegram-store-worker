@@ -56,11 +56,15 @@ export async function products(db,env,uid,page=0,categoryId=null,query=null,feat
   if(featuredOnly){records=(await db.prepare('SELECT * FROM products WHERE active=1 AND featured=1 ORDER BY id DESC LIMIT 10').all()).results??[];}
   else records=await listProducts(db,page,categoryId,query);
   const rows=[];
-  for(const p of records){
-    const available=await purchaseAvailability(db,p);
-    const value=p.price_iqd?await priceDisplay(db,uid,p.price_iqd):'غير مسعّر';
+  // Read currency/rate once per page; independent inventory checks run concurrently.
+  const currency=await getUser(db,uid);
+  const rate=currency?.currency_preference==='USD'?await usdRate(db):null;
+  const statuses=await Promise.all(records.map(p=>purchaseAvailability(db,p)));
+  records.forEach((p,index)=>{
+    const available=statuses[index];
+    const value=p.price_iqd?(rate?formatUSD(Math.round(p.price_iqd*100/rate)):formatIQD(p.price_iqd)):'غير مسعّر';
     rows.push([button(`${available.ready?'🟢':'🔴'} ${short(p.title,29)} — ${value} • ${available.ready?(available.count??'متوفر'):'غير متاح'}`,`product:${p.id}`,available.ready?'success':'danger')]);
-  }
+  });
   if(!featuredOnly && !query){
     const pages=[];
     const prefix=categoryId?`category:${categoryId}`:'products';

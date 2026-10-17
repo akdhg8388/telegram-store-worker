@@ -9,7 +9,7 @@ import {processUpdate} from '../src/bot.js';
 const env={ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'TEST_ONLY',STORE_NAME:'My Store',BOT_USERNAME:'MyStoreIQBot',ENABLE_MANUAL_TOPUPS:'false'};
 function fixture(){
   const conn=new DatabaseSync(':memory:');
-  for(const n of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql'])
+  for(const n of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql'])
     conn.exec(readFileSync(new URL('../migrations/'+n,import.meta.url),'utf8'));
   conn.prepare("INSERT INTO users(tg_id,first_name,username) VALUES(991,'Admin','owner'),(101,'Customer','client')").run();
   conn.prepare("INSERT INTO products(category_id,title,price_stars,stock,active) VALUES(1,'متاح الآن',30,8,1),(1,'نفد المخزون',30,0,1),(1,'حسب الطلب',30,NULL,1)").run();

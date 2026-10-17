@@ -2,6 +2,7 @@ import {button,keyboard,backRow,formatIQD,short} from './common.js';
 import {getUser,getProduct,getSession,setSession,clearSession} from './database.js';
 import {usdRate,formatUSD,baghdadDate} from './wallet.js';
 import {sendText,telegram} from './telegram.js';
+import {trackPurchaseView} from './purchase-views.js';
 
 export async function purchaseAvailability(db,p){
   if(!p || !p.active || !Number.isSafeInteger(p.price_iqd) || p.price_iqd<=0)
@@ -10,7 +11,10 @@ export async function purchaseAvailability(db,p){
   if(p.fulfillment_mode==='shared')return String(p.delivery_shared_text||'').trim()
     ?{ready:true,count:p.stock}: {ready:false,reason:'محتوى التسليم غير مهيأ بعد.'};
   if(p.fulfillment_mode==='unique'){
-    const r=await db.prepare('SELECT COUNT(*) AS n FROM product_delivery_items WHERE product_id=? AND used_by_purchase_id IS NULL').bind(p.id).first();
+    const r=await db.prepare(`SELECT COUNT(*) AS n FROM product_delivery_items i
+       WHERE i.product_id=? AND i.used_by_purchase_id IS NULL
+         AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
+           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL))` ).bind(p.id).first();
     const available=Number(r?.n||0);
     return available>0?{ready:true,count:p.stock===null?available:Math.min(available,p.stock)}
       :{ready:false,reason:'نفدت بيانات التسليم الجاهزة.'};
@@ -36,9 +40,11 @@ export async function beginPurchase(db,env,uid,p,nonceFactory=()=>crypto.randomU
     `💳 رصيد المحفظة غير كافٍ.\n\n🛍️ ${short(p.title,100)}\n💰 السعر: ${shownPrice}\n👛 رصيدك الحالي: ${shownBalance}\n📉 الناقص: ${await priceDisplay(db,uid,amount-balance)}\n\nيرجى شحن محفظتك للمتابعة.`,keyboard([button('➕ شحن المحفظة','topup','success')],[button('💳 محفظتي','wallet')],backRow()));
   const nonce=nonceFactory();
   await setSession(db,uid,'wallet_purchase_confirm',{productId:p.id,nonce});
-  return sendText(env,uid,`🛒 تأكيد الشراء من المحفظة\n\n📦 المنتج: ${short(p.title,100)}\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب المنتج'}\n💰 السعر: ${shownPrice}\n👛 رصيدك: ${shownBalance}\n\n✅ سيتم خصم المبلغ مرة واحدة وتسليم المحتوى المتاح فوراً.`,keyboard(
+  const confirmation=await sendText(env,uid,`🛒 تأكيد الشراء من المحفظة\n\n📦 المنتج: ${short(p.title,100)}\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب المنتج'}\n💰 السعر: ${shownPrice}\n👛 رصيدك: ${shownBalance}\n\n✅ سيتم خصم المبلغ مرة واحدة وتسليم المحتوى المتاح فوراً.`,keyboard(
     [button('✅ تأكيد الشراء الفوري',`wallet_confirm:${nonce}`,'success')],
     [button('↩️ رجوع للمنتج',`product:${p.id}`,'danger')]));
+  await trackPurchaseView(db,uid,confirmation);
+  return confirmation;
 }
 export async function commitPurchase(db,env,uid,nonce){
   if(!/^[0-9a-f-]{36}$/i.test(nonce))return null;
@@ -57,17 +63,22 @@ export async function commitPurchase(db,env,uid,nonce){
     product_name,product_description,duration_months,delivery_payload,usage_instructions,photo_file_id)
     SELECT ?,p.id,p.price_iqd,?,
       CASE WHEN p.fulfillment_mode='unique' THEN
-        (SELECT i.id FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL ORDER BY i.id LIMIT 1)
+        (SELECT i.id FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL
+         AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
+           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)) ORDER BY i.id LIMIT 1)
         ELSE NULL END,
       p.title,p.description,p.duration_months,
       CASE WHEN p.fulfillment_mode='unique' THEN
-        COALESCE((SELECT i.payload FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL ORDER BY i.id LIMIT 1),'')
+        COALESCE((SELECT i.payload FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL
+         AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
+           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)) ORDER BY i.id LIMIT 1),'')
         ELSE p.delivery_shared_text END,
       p.usage_instructions,p.photo_file_id
     FROM products p WHERE p.id=? AND p.active=1 AND p.price_iqd>0
       AND (p.stock IS NULL OR p.stock>0)
       AND ( (p.fulfillment_mode='shared' AND length(trim(p.delivery_shared_text))>0)
-         OR (p.fulfillment_mode='unique' AND EXISTS(SELECT 1 FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL)))`;
+         OR (p.fulfillment_mode='unique' AND EXISTS(SELECT 1 FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL
+         AND NOT EXISTS(SELECT 1 FROM product_delivery_items older WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)))))`;
   try {
     const result=await db.prepare(insert).bind(uid,nonce,p.id).run();
     if(!result.meta?.changes)return {failed:'لم يعد هذا المنتج متوفراً. لم يُخصم شيء.'};
@@ -91,9 +102,9 @@ export async function showReceipt(db,env,uid,id){
   const markup=keyboard([button('📦 مشترياتي','wallet_purchases','success')],[button('🏠 الرئيسية','home','primary')]);
   // The receipt is saved BEFORE sending. A transient Telegram error never loses
   // the purchased content; the customer can reopen it under My Purchases.
-  try {await sendText(env,uid,text,markup);}catch(e){console.error('Wallet receipt Telegram failure',String(e));}
+  try {const msg=await sendText(env,uid,text,markup);await trackPurchaseView(db,uid,msg);}catch(e){console.error('Wallet receipt Telegram failure',String(e));}
   if(sale.photo_file_id){
-    try {await telegram(env,'sendPhoto',{chat_id:uid,photo:sale.photo_file_id,caption:`🖼️ صورة ${short(sale.product_name,110)} — عملية #${sale.id}`});}
+    try {const msg=await telegram(env,'sendPhoto',{chat_id:uid,photo:sale.photo_file_id,caption:`🖼️ صورة ${short(sale.product_name,110)} — عملية #${sale.id}`});await trackPurchaseView(db,uid,msg);}
     catch(e){console.error('Wallet receipt photo failure',String(e));}
   }
   return sale;

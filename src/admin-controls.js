@@ -101,7 +101,7 @@ async function productDetail(db,env,uid,id,messageId=null){
     rows.push(fields.map(f=>button(PRODUCT_FIELDS[f].label,`admin_product_field:${id}:${f}`)));
   rows.push([button('📷 إضافة/تغيير صورة المنتج',`admin_product_photo:${id}`,'primary'),button('🗑️ حذف الصورة',`admin_product_photo_delete:${id}`,'danger')]);
   rows.push([button('📦 تسليم محتوى ثابت',`admin_product_mode:${id}:shared`,'success'),button('🔑 تسليم كود فريد',`admin_product_mode:${id}:unique`,'primary')]);
-  rows.push([button('➕ إضافة كود تسليم فريد',`admin_product_code:${id}`,'success'),button('⏸️ إيقاف الشراء التلقائي',`admin_product_mode:${id}:disabled`,'danger')]);
+  rows.push([button('➕ إضافة أكواد (كود في كل سطر)',`admin_product_code:${id}`,'success'),button('⏸️ إيقاف الشراء التلقائي',`admin_product_mode:${id}:disabled`,'danger')]);
   rows.push([button('📂 نقل إلى قسم آخر',`admin_product_categories:${id}`)]);
   rows.push([button(p.active?'🚫 إخفاء المنتج':'✅ إظهار المنتج',`admin_product_toggle:${id}:active`,p.active?'danger':'success'),
              button(p.featured?'⭐ إلغاء التمييز':'🌟 تمييز المنتج',`admin_product_toggle:${id}:featured`)]);
@@ -329,14 +329,19 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_product_mode:')){
     const [,rawId,mode]=data.split(':');const id=positiveInt(rawId);
     if(!id||!['shared','unique','disabled'].includes(mode))return true;
-    await db.prepare('UPDATE products SET fulfillment_mode=? WHERE id=?').bind(mode,id).run();
+    await db.prepare(`UPDATE products SET fulfillment_mode=?,
+      stock=CASE WHEN ?='unique' THEN
+        (SELECT COUNT(*) FROM product_delivery_items i WHERE i.product_id=products.id AND i.used_by_purchase_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM product_delivery_items older
+             WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)))
+        ELSE stock END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(mode,mode,id).run();
     await audit(db,uid,'set_delivery_mode','product',id);
     await productDetail(db,env,uid,id,messageId);
   }
   else if(data.startsWith('admin_product_code:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
     await setSession(db,uid,'owner_product_code',{id});
-    await sendText(env,uid,'🔑 أرسل كوداً أو بيانات اشتراك واحدة للتسليم مرة واحدة فقط. ستحفظ كقطعة فريدة. للإلغاء /cancel.');
+    await sendText(env,uid,'🔑 أرسل كوداً واحداً، أو حتى 50 كوداً دفعة واحدة (كود في كل سطر).\n\nكل عملية شراء تستلم كوداً مختلفاً، والأكواد المباعة لا تعود للمخزون. لن تتكرر الأكواد المتطابقة.\n\nللإلغاء /cancel.');
   }
   else if(data.startsWith('admin_product_field:')){ 
     const [, id,field]=data.split(':');
@@ -411,11 +416,31 @@ export async function handleAdminText(db,env,uid,session,message){
   if(session.action==='owner_product_code'){
     const id=positiveInt(session.payload?.id);
     if(!id)return true;
-    if(!text||text.length>1800){await sendText(env,uid,'أرسل بيانات تسليم من 1 إلى 1800 حرف.');return true;}
-    const item=await db.prepare('INSERT INTO product_delivery_items(product_id,payload) SELECT id,? FROM products WHERE id=?').bind(text,id).run();
-    if(item.meta?.changes)await audit(db,uid,'add_unique_delivery','product',id);
+    const values=text.split(/\r?\n/).map(v=>v.trim()).filter(Boolean);
+    if(!values.length||values.length>50||text.length>3900||values.some(v=>v.length>1800)){
+      await sendText(env,uid,'❌ أرسل من 1 إلى 50 كوداً، كود واحد في كل سطر. الحد الأقصى للرسالة 3900 حرف.');
+      return true;
+    }
+    const codes=[...new Set(values)];
+    const product=await db.prepare('SELECT id FROM products WHERE id=?').bind(id).first();
+    if(!product){await clearSession(db,uid);return sendText(env,uid,'المنتج غير موجود.');}
+    // D1 batch is an atomic transaction: reject duplicate values, never overwrite sold codes.
+    const inserts=codes.map(code=>db.prepare(`INSERT INTO product_delivery_items(product_id,payload)
+      SELECT id,? FROM products WHERE id=? AND NOT EXISTS
+      (SELECT 1 FROM product_delivery_items WHERE product_id=? AND payload=?)`).bind(code,id,id,code));
+    const stockRefresh=db.prepare(`UPDATE products SET stock=(SELECT COUNT(*) FROM product_delivery_items i
+        WHERE i.product_id=? AND i.used_by_purchase_id IS NULL
+          AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
+            WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL))),
+        updated_at=CURRENT_TIMESTAMP WHERE id=? AND fulfillment_mode='unique'`).bind(id,id);
+    const result=await db.batch([...inserts,stockRefresh]);
+    const added=result.slice(0,codes.length).reduce((n,v)=>n+Number(v.meta?.changes||0),0);
+    if(added)await audit(db,uid,'add_unique_delivery_codes','product',id);
     await clearSession(db,uid);
-    await sendText(env,uid,'✅ تمت إضافة قطعة تسليم واحدة. لن تُباع مرتين. اضبط وضع التسليم إلى «كود فريد» إن لم يكن مفعلاً.',keyboard([button('📦 إعداد المنتج',`admin_product:${id}`,'success')],adminBack));
+    const available=await db.prepare(`SELECT COUNT(*) n FROM product_delivery_items i WHERE i.product_id=?
+      AND i.used_by_purchase_id IS NULL AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
+        WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL))`).bind(id).first();
+    await sendText(env,uid,`✅ أضيف ${added} كود فريد.\n🔁 أكواد مكررة لم تُضف: ${values.length-added}\n🔑 الأكواد الباقية للبيع: ${available?.n||0}\n\nلتفعيلها اختر «🔑 تسليم كود فريد». وكل شراء جديد يستهلك كوداً واحداً دون إعادة استخدامه.`,keyboard([button('📦 إعداد المنتج',`admin_product:${id}`,'success')],adminBack));
     return true;
   }
   if(session.action==='owner_bot_profile_picture'){

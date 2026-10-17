@@ -9,6 +9,7 @@ import {amountInIQD,topupDecisionText,guardUser} from './moderation.js';
 import {submitSupport,handleSupportCallback,handleSupportReply,handleCustomerSupportCallback} from './support.js';
 import {handleUserCallback,handleUserText} from './admin-users.js';
 import {beginPurchase,commitPurchase,showReceipt,purchaseList} from './wallet-purchase.js';
+import {readPurchaseViewIds,cleanupPurchaseViews} from './purchase-views.js';
 
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}) {
   for(const admin of adminIds(env)) {
@@ -204,12 +205,54 @@ async function adminMenu(db,env,uid,messageId=null){
     [button('📨 رسائل الدعم الفني','support_inbox','primary'),button('🚫 إدارة المستخدمين','admin_users','primary')],
     [button('👤 التواصل المباشر مع المسؤول','admin_support_contact','primary')],
     [button('🎨 تخصيص واجهة المتجر','admin_visuals','primary')],
+    [button('✅ مشتريات المستخدمين الناجحة','admin_wallet_sales','success')],
     [button('📦 بانتظار التسليم','admin_delivery')],
     [button('📦 المنتجات والأسعار','admin_products:0'),button('📂 الأقسام','admin_manage_categories')],
     [button('➕ إضافة منتج','admin_addproduct'),button('➕ إضافة قسم','admin_addcategory')],
     [button('⚙️ الإعدادات والتعليمات','admin_settings:0','primary')],
     [button('📊 الإحصائيات','admin_stats'),button('🔎 البحث عن عميل','admin_find_user')],
     [button('📖 دليل الإدارة','admin_help')],backRow()),messageId);
+}
+async function adminWalletSales(db,env,uid,page=0,messageId=null){
+  if(!isAdmin(env,uid))return sendText(env,uid,'⛔ غير مصرح.');
+  const limit=10;
+  const entries=(await db.prepare(`SELECT w.id,w.product_name,w.price_iqd,w.created_at,
+        w.user_tg_id,u.first_name,u.username
+      FROM wallet_purchases w JOIN users u ON u.tg_id=w.user_tg_id
+      ORDER BY w.id DESC LIMIT ? OFFSET ?`).bind(limit+1,Math.max(0,page)*limit).all()).results??[];
+  const rows=entries.slice(0,limit).map(x=>[button(`✅ #${x.id} • ${short(x.first_name||x.username||x.user_tg_id,15)} • ${formatIQD(x.price_iqd)}`,`admin_wallet_sale:${x.id}`,'success')]);
+  const pagination=[];
+  if(page>0)pagination.push(button('⬅️ السابق',`admin_wallet_sales:${page-1}`));
+  if(entries.length>limit)pagination.push(button('التالي ➡️',`admin_wallet_sales:${page+1}`));
+  if(pagination.length)rows.push(pagination);
+  rows.push([button('🔄 تحديث المشتريات','admin_wallet_sales','primary')],[button('🛡️ لوحة المدير','admin','primary')]);
+  return sendOrEditText(env,uid,`✅ مشتريات المستخدمين الناجحة
+
+هنا تظهر عمليات المحفظة التي اكتمل خصمها وتسليمها فقط. اختر عملية لعرض الاسم والمعرّف والتاريخ والخدمة والسعر.`,keyboard(...rows),messageId);
+}
+async function adminWalletSale(db,env,uid,id,messageId=null){
+  if(!isAdmin(env,uid))return sendText(env,uid,'⛔ غير مصرح.');
+  if(!Number.isSafeInteger(id)||id<=0)return;
+  const sale=await db.prepare(`SELECT w.*,u.first_name,u.username FROM wallet_purchases w
+    JOIN users u ON u.tg_id=w.user_tg_id WHERE w.id=?`).bind(id).first();
+  if(!sale)return sendOrEditText(env,uid,'هذه العملية غير موجودة.',keyboard([button('↩️ قائمة المشتريات','admin_wallet_sales')]),messageId);
+  const name=short(sale.first_name||'بدون اسم',100);
+  const username=sale.username?'@'+sale.username:'غير متوفر';
+  const text=`✅ عملية شراء مكتملة #${sale.id}
+
+👤 الاسم: ${name}
+🔗 اسم المستخدم: ${username}
+🆔 Telegram ID: ${sale.user_tg_id}
+📦 الخدمة: ${short(sale.product_name,150)}
+🛍️ رقم المنتج: #${sale.product_id}
+💰 السعر المدفوع: ${formatIQD(sale.price_iqd)}
+📅 التاريخ والوقت: ${baghdadDate(sale.created_at)} (بغداد)
+📊 الحالة: ✅ مدفوعة ومسلّمة
+🔑 نوع التسليم: ${sale.delivery_item_id?'كود فريد (مستخدم)':'محتوى ثابت'}
+📝 تفاصيل المنتج: ${short(sale.product_description||'—',500)}
+📖 طريقة الاستخدام: ${short(sale.usage_instructions||'—',450)}
+📦 بيانات التسليم: ${short(sale.delivery_payload||'—',650)}`;
+  return sendOrEditText(env,uid,text,keyboard([button('⬅️ كل المشتريات الناجحة','admin_wallet_sales','primary')],[button('🛡️ لوحة المدير','admin','primary')]),messageId);
 }
 async function adminList(db,env,uid,type,messageId=null){
   if(!isAdmin(env,uid))return sendText(env,uid,'⛔ صلاحيات غير كافية.');
@@ -343,7 +386,16 @@ async function handleCallback(db,env,ctx,q){
   if(await handleSupportCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleUserCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleAdminCallback(db,env,uid,data,q.message?.message_id))return;
-  if(data==='home'){await clearSession(db,uid);return ui.home(db,env,uid,q.message?.message_id)}
+  if(data==='home'){
+    // Home edits the selected message. Only erase tracked transient purchase messages,
+    // never general menus, old chat history or saved financial/customer records.
+    const stale=readPurchaseViewIds(db,uid).catch(e=>{console.error('Purchase-view lookup failed',String(e));return [];});
+    await clearSession(db,uid);
+    const homeResult=await ui.home(db,env,uid,q.message?.message_id);
+    ctx.waitUntil(stale.then(ids=>cleanupPurchaseViews(db,env,uid,ids,q.message?.message_id))
+      .catch(e=>console.error('Purchase-view cleanup failed',String(e))));
+    return homeResult;
+  }
   if(data==='categories')return ui.categories(db,env,uid,q.message?.message_id);
   if(data==='featured')return ui.products(db,env,uid,0,null,null,true,q.message?.message_id);
   if(data==='profile')return ui.profile(db,env,uid,q.message?.message_id);
@@ -480,6 +532,10 @@ async function handleCallback(db,env,ctx,q){
   if(data.startsWith('topup_commit:')){const [,rawId,rawAmt]=data.split(':');return settleTopup(db,env,uid,Number(rawId),Number(rawAmt),q.message?.message_id)}
   if(data.startsWith('topup_reject:'))return settleTopup(db,env,uid,Number(data.split(':')[1]),null,q.message?.message_id);
   if(data.startsWith('topup_approve:')){const id=Number(data.split(':')[1]);const row=await db.prepare("SELECT * FROM topup_requests WHERE id=? AND status='pending'").bind(id).first();return row?showTopupApproval(db,env,uid,id,row.amount_iqd):sendText(env,uid,'الطلب تمت معالجته.')} 
+  if(data==='admin_wallet_sales' || /^admin_wallet_sales:\d+$/.test(data))
+    return adminWalletSales(db,env,uid,Math.min(100,Number(data.split(':')[1]||0)),q.message?.message_id);
+  if(/^admin_wallet_sale:\d+$/.test(data))
+    return adminWalletSale(db,env,uid,Number(data.split(':')[1]),q.message?.message_id);
   if(data==='admin_orders')return adminList(db,env,uid,'orders',q.message?.message_id);
   if(data==='admin_delivery')return adminList(db,env,uid,'delivery',q.message?.message_id);
   if(data==='admin_categories'){
