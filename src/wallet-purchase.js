@@ -4,6 +4,7 @@ import {getUser,getProduct,getSession,setSession,clearSession} from './database.
 import {usdRate,formatUSD,baghdadDate} from './wallet.js';
 import {sendText,telegram} from './telegram.js';
 import {trackPurchaseView} from './purchase-views.js';
+import {warrantyLine} from './warranty.js';
 
 export async function purchaseAvailability(db,p){
   if(!p || !p.active || !Number.isSafeInteger(p.price_iqd) || p.price_iqd<=0)
@@ -37,14 +38,15 @@ export async function beginPurchase(db,env,uid,p,nonceFactory=()=>crypto.randomU
   const amount=Number(p.price_iqd),balance=Number(u?.wallet_balance_iqd||0);
   const price=value=>u?.currency_preference==='USD'&&rate?formatUSD(Math.round(value*100/rate)):formatIQD(value);
   const title=short(languageOf(env)==='en'&&p.title_en||p.title,100);
+  const warranty=warrantyLine(p,languageOf(env));
   if(balance<amount)return sendText(env,uid,languageOf(env)==='en'
-    ?`💳 Insufficient wallet balance.\n\n🛍️ ${title}\n💰 Price: ${price(amount)}\n👛 Your balance: ${price(balance)}\n📉 Amount needed: ${price(amount-balance)}\n\nPlease top up your wallet to continue.`
-    :`💳 رصيد المحفظة غير كافٍ.\n\n🛍️ ${title}\n💰 السعر: ${price(amount)}\n👛 رصيدك الحالي: ${price(balance)}\n📉 الناقص: ${price(amount-balance)}\n\nيرجى شحن محفظتك للمتابعة.`,keyboard([button('➕ شحن المحفظة','topup','success')],[button('💳 محفظتي','wallet')],backRow()),{preserveText:languageOf(env)==='en'});
+    ?`💳 Insufficient wallet balance.\n\n🛍️ ${title}\n💰 Price: ${price(amount)}${warranty?'\n'+warranty:''}\n👛 Your balance: ${price(balance)}\n📉 Amount needed: ${price(amount-balance)}\n\nPlease top up your wallet to continue.`
+    :`💳 رصيد المحفظة غير كافٍ.\n\n🛍️ ${title}\n💰 السعر: ${price(amount)}${warranty?'\n'+warranty:''}\n👛 رصيدك الحالي: ${price(balance)}\n📉 الناقص: ${price(amount-balance)}\n\nيرجى شحن محفظتك للمتابعة.`,keyboard([button('➕ شحن المحفظة','topup','success')],[button('💳 محفظتي','wallet')],backRow()),{preserveText:languageOf(env)==='en'});
   const nonce=nonceFactory();
   await setSession(db,uid,'wallet_purchase_confirm',{productId:p.id,nonce});
   const details=languageOf(env)==='en'
-    ?`🛒 Confirm Wallet Purchase\n\n📦 Product: ${title}\n⏳ Duration: ${p.duration_months?p.duration_months+' month(s)':'As specified for this product'}\n💰 Price: ${price(amount)}\n👛 Your balance: ${price(balance)}\n\n✅ Your wallet will be charged once, and the item will be delivered immediately.`
-    :`🛒 تأكيد الشراء من المحفظة\n\n📦 المنتج: ${title}\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب المنتج'}\n💰 السعر: ${price(amount)}\n👛 رصيدك: ${price(balance)}\n\n✅ سيتم خصم المبلغ مرة واحدة وتسليم المحتوى المتاح فوراً.`;
+    ?`🛒 Confirm Wallet Purchase\n\n📦 Product: ${title}\n⏳ Duration: ${p.duration_months?p.duration_months+' month(s)':'As specified for this product'}\n💰 Price: ${price(amount)}${warranty?'\n'+warranty:''}\n👛 Your balance: ${price(balance)}\n\n✅ Your wallet will be charged once, and the item will be delivered immediately.`
+    :`🛒 تأكيد الشراء من المحفظة\n\n📦 المنتج: ${title}\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب المنتج'}\n💰 السعر: ${price(amount)}${warranty?'\n'+warranty:''}\n👛 رصيدك: ${price(balance)}\n\n✅ سيتم خصم المبلغ مرة واحدة وتسليم المحتوى المتاح فوراً.`;
   const confirmation=await sendText(env,uid,details,keyboard(
     [button('✅ تأكيد الشراء الفوري',`wallet_confirm:${nonce}`,'success')],
     [button('↩️ رجوع للمنتج',`product:${p.id}`,'danger')]),{preserveText:languageOf(env)==='en'});
@@ -65,7 +67,8 @@ export async function commitPurchase(db,env,uid,nonce){
   // One INSERT + SQLite triggers: debit, delivery-code claim, and stock decrement
   // succeed atomically or all roll back. Never trust a price sent by the callback.
   const insert=`INSERT INTO wallet_purchases (user_tg_id,product_id,price_iqd,submission_key,delivery_item_id,
-    product_name,product_description,duration_months,delivery_payload,usage_instructions,photo_file_id)
+    product_name,product_description,duration_months,delivery_payload,usage_instructions,photo_file_id,
+    warranty_visible,warranty_available,warranty_terms_ar,warranty_terms_en)
     SELECT ?,p.id,p.price_iqd,?,
       CASE WHEN p.fulfillment_mode='unique' THEN
         (SELECT i.id FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL
@@ -78,7 +81,8 @@ export async function commitPurchase(db,env,uid,nonce){
          AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
            WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)) ORDER BY i.id LIMIT 1),'')
         ELSE p.delivery_shared_text END,
-      p.usage_instructions,p.photo_file_id
+      p.usage_instructions,p.photo_file_id,
+      p.warranty_visible,p.warranty_available,p.warranty_terms_ar,p.warranty_terms_en
     FROM products p WHERE p.id=? AND p.active=1 AND p.price_iqd>0
       AND (p.stock IS NULL OR p.stock>0)
       AND ( (p.fulfillment_mode='shared' AND length(trim(p.delivery_shared_text))>0)
@@ -108,9 +112,10 @@ export async function showReceipt(db,env,uid,id){
   const name=short(english&&sale.current_title_en||sale.product_name,150);
   const details=short(english&&sale.current_description_en||sale.product_description||'—',650);
   const usage=short(english&&sale.current_usage_en||sale.usage_instructions||choice(env,'لم يضف المدير تعليمات إضافية.','No additional instructions provided.'),900);
+  const warranty=warrantyLine(sale,languageOf(env));
   const text=english
-   ?`✅ Purchase & delivery successful!\n\n🧾 Purchase: #${sale.id}\n🛍️ Product: ${name}\n📝 Details: ${details}\n⏳ Duration: ${sale.duration_months?sale.duration_months+' month(s)':'As specified for the item'}\n💰 Amount charged: ${format(sale.price_iqd)}\n💳 Remaining balance: ${format(current?.wallet_balance_iqd||0)}\n📅 Date & time: ${baghdadDate(sale.created_at,english?'en':'ar')}\n\n📦 Your delivered item:\n${short(sale.delivery_payload,1400)}\n\n📖 How to use:\n${usage}`
-   :`✅ تم الشراء والتسليم بنجاح!\n\n🧾 العملية: #${sale.id}\n🛍️ المنتج: ${name}\n📝 التفاصيل: ${details}\n⏳ المدة: ${sale.duration_months?sale.duration_months+' شهر':'حسب المنتج'}\n💰 المبلغ المخصوم: ${format(sale.price_iqd)}\n💳 رصيدك المتبقي: ${format(current?.wallet_balance_iqd||0)}\n📅 التاريخ والوقت: ${baghdadDate(sale.created_at,english?'en':'ar')}\n\n📦 بيانات المنتج المستلم:\n${short(sale.delivery_payload,1400)}\n\n📖 طريقة الاستخدام:\n${usage}`;
+   ?`✅ Purchase & delivery successful!\n\n🧾 Purchase: #${sale.id}\n🛍️ Product: ${name}\n📝 Details: ${details}\n⏳ Duration: ${sale.duration_months?sale.duration_months+' month(s)':'As specified for the item'}\n💰 Amount charged: ${format(sale.price_iqd)}${warranty?'\n'+warranty:''}\n💳 Remaining balance: ${format(current?.wallet_balance_iqd||0)}\n📅 Date & time: ${baghdadDate(sale.created_at,english?'en':'ar')}\n\n📦 Your delivered item:\n${short(sale.delivery_payload,1400)}\n\n📖 How to use:\n${usage}`
+   :`✅ تم الشراء والتسليم بنجاح!\n\n🧾 العملية: #${sale.id}\n🛍️ المنتج: ${name}\n📝 التفاصيل: ${details}\n⏳ المدة: ${sale.duration_months?sale.duration_months+' شهر':'حسب المنتج'}\n💰 المبلغ المخصوم: ${format(sale.price_iqd)}${warranty?'\n'+warranty:''}\n💳 رصيدك المتبقي: ${format(current?.wallet_balance_iqd||0)}\n📅 التاريخ والوقت: ${baghdadDate(sale.created_at,english?'en':'ar')}\n\n📦 بيانات المنتج المستلم:\n${short(sale.delivery_payload,1400)}\n\n📖 طريقة الاستخدام:\n${usage}`;
   const markup=keyboard([button('📦 مشترياتي','wallet_purchases','success')],[button('🏠 الرئيسية','home','primary')]);
   try {const msg=await sendText(env,uid,text,markup,{preserveText:english});await trackPurchaseView(db,uid,msg);}catch(e){console.error('Wallet receipt Telegram failure',String(e));}
   if(sale.photo_file_id){

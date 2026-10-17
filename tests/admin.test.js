@@ -9,7 +9,7 @@ import {home} from '../src/ui.js';
 
 function sqliteAdapter(){
  const connection=new DatabaseSync(':memory:');
- for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql','0011_product_visuals.sql'])
+ for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql','0011_product_visuals.sql','0012_product_warranty.sql'])
    connection.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
  const db={
    prepare(sql){

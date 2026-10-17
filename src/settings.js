@@ -43,7 +43,7 @@ export function validateSetting(key,input){
   const field=SETTING_FIELDS[key];
   if(!field)return {ok:false,reason:'الإعداد غير مدعوم.'};
   const value=String(input??'').trim();
-  if(field.internal && (!/^-?\d+$/.test(value) || Math.abs(Number(value))>1000000000))return {ok:false,reason:'فرق العداد غير صالح.'};
+  if(field.internal && !field.internalText && (!/^-?\d+$/.test(value) || Math.abs(Number(value))>1000000000))return {ok:false,reason:'فرق العداد غير صالح.'};
   if(field.username && value && !/^@?[A-Za-z][A-Za-z0-9_]{4,31}$/.test(value))return {ok:false,reason:'اكتب اسم مستخدم تيليجرام صحيحاً مثل @MyAccount (بدون رابط).'};
   if(field.customEmoji && value && !/^\d{10,30}$/.test(value))return {ok:false,reason:'أرسل custom_emoji_id الصحيح أو أرسل رسالة تتضمن الرمز المتحرك، أو /empty للمسح.'};
   if(field.rate && (!/^\d+$/.test(value) || Number(value)<100 || Number(value)>10000))return {ok:false,reason:'أدخل سعراً صحيحاً بين 100 و10,000 دينار لكل دولار واحد.'};

@@ -12,7 +12,7 @@ import {CUSTOMER_COMMANDS_EN,OWNER_COMMANDS_EN} from '../src/commands.js';
 
 function fixture(){
   const conn=new DatabaseSync(':memory:');
-  for(const file of ['0001_init','0002_admin_controls','0003_reliability','0004_reference_catalog','0005_persistent_navigation','0006_wallet_checkout','0007_support_moderation_topup','0008_custom_ui_customer_inbox_cleanup','0009_wallet_auto_delivery','0010_purchase_views_and_unique_codes','0011_product_visuals'])
+  for(const file of ['0001_init','0002_admin_controls','0003_reliability','0004_reference_catalog','0005_persistent_navigation','0006_wallet_checkout','0007_support_moderation_topup','0008_custom_ui_customer_inbox_cleanup','0009_wallet_auto_delivery','0010_purchase_views_and_unique_codes','0011_product_visuals','0012_product_warranty'])
     conn.exec(readFileSync(new URL(`../migrations/${file}.sql`,import.meta.url),'utf8'));
   conn.exec("INSERT INTO users(tg_id,first_name,language) VALUES (991,'Owner','ar'),(101,'John','en');");
   conn.exec("INSERT INTO products(category_id,title,title_en,description,description_en,usage_instructions,usage_instructions_en,price_stars,price_iqd,stock,active,fulfillment_mode,delivery_shared_text,custom_emoji_id) VALUES (1,'منتج', 'Premium Product','وصف عربي','English description','استخدم','Follow the setup guide',1,1000,3,1,'shared','TEST-SHARED','5400000000000000001')");

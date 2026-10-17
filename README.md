@@ -90,7 +90,7 @@ V12 يعرض تجريبياً الشراء من رصيد المحفظة المس
 
 هذه **النسخة الأساسية قيد التطوير**؛ وليست نسخة مطابقة 100% للفيديو المرجعي. القوائم الرئيسية تحاول تعديل الرسالة نفسها عند التنقل، بينما بعض عمليات الشراء والإدارة تنشئ رسائل جديدة عمداً. يتطلب التطابق البصري الكامل مع الفيديو مرحلة مراجعة إضافية. أزرار Telegram ذات ألوان وأبعاد تخضع لقيود تطبيق Telegram، ولا يمكن التحكم في لونها بالبكسل.
 
-ما يزال مطلوباً قبل الإنتاج: مطابقة بقية الشاشات مع الفيديو، توسعة إدارة الطلبات، إكمال ترجمة اللغات، دعم كميات متعددة، مراجعة حالات استرداد فشل قاعدة البيانات بعد نجاح API، اختبارات Cloudflare staging الفعلية، إعداد شروط الاستخدام والخصوصية، ومراجعة المبيعات والتراخيص الخاصة بالاشتراكات.
+ما يزال مطلوباً قبل الإنتاج: مطابقة بقية الشاشات مع الفيديو، توسعة إدارة الطلبات، مراجعة الترجمة الإنجليزية للرسائل غير الشائعة والبيانات التي أضافها المدير، دعم كميات متعددة، مراجعة حالات استرداد فشل قاعدة البيانات بعد نجاح API، اختبارات Cloudflare staging الفعلية، إعداد شروط الاستخدام والخصوصية، ومراجعة المبيعات والتراخيص الخاصة بالاشتراكات.
 
 لا تعلن جاهزية البيع الحقيقي حتى تختبر الشراء والتسليم على بيئة مستقلة وتراجع توافق طريقة الدفع مع قواعد Telegram.
 
@@ -164,13 +164,23 @@ V12 يعرض تجريبياً الشراء من رصيد المحفظة المس
 - تُطبّق ترحيلات D1 في `migrations/0010_purchase_views_and_unique_codes.sql` أثناء النشر. لا تُنشر هذه النسخة تلقائياً بمجرد تحديث GitHub.
 - تذكير: بيع المنتجات والخدمات الرقمية داخل بوت Telegram له متطلبات دفع خاصة بالمنصة؛ يجب مراجعة التوافق قبل الاستخدام الإنتاجي.
 
+## V14 — التخصيص المتحرك والإنجليزية وتحسين الاستجابة
 
-## V14 — Animated buttons, bilingual store and improved performance
+- من `/admin` ← **🎨 تخصيص واجهة المتجر** ← **🎨 تخصيص جميع أزرار الرئيسية**: اختر أي زر لتعديل عنوانه العربي، وعنوانه الإنجليزي، ورمزه المتحرك. تبقى `callback_data` والأدوار الأمنية والصلاحيات كما كانت. يستطيع المدير استعادة زر واحد أو استعادة جميع الأزرار بعد تأكيد صريح.
+- الرموز القديمة للصفحات (مثل `orders_custom_emoji_id`) تستعمل أيضاً على زرها في الرئيسية إذا لم تحدد رمزاً خاصاً لذلك الزر. تُرسل رموز الأزرار في حقل Bot API `icon_custom_emoji_id`، وتُزال من الطلب وتُعاد محاولة العرض تلقائياً إذا رفض تيليجرام دعمها. قد يتطلب عرضها Telegram Premium لدى مالك البوت أو شروط تيليجرام الأخرى وإصدار تطبيق مناسب.
+- **🛍️ رموز المنتج والسعر والمخزون**: إعدادات عامة لأيقونات معلومات المنتج في الرسالة (product/price/stock). يمكن تعيين رمز منفصل لمنتج معين من لوحة إدارته. يظهر رمز المنتج في زر المنتج، بينما تظهر رموز السعر والمخزون المستقلة كـ Telegram custom emoji entities داخل تفاصيل المنتج؛ Telegram يدعم رمز custom emoji واحداً للزر الواحد، لذلك لا نستطيع وضع ثلاثة رموز مستقلة في زر واحد.
+- زر **🌐 اللغة** يبدّل فعلياً بين العربية والإنجليزية ويحفظ `users.language` في D1، ويحدث قائمة الأوامر الخاصة بالمستخدم دون التأثير على لغة بقية العملاء. تترجم الواجهة الإدارية والعميل ورسائل النظام الأساسية للإنجليزية. أسماء المنتجات وأوصافها وتعليماتها التي يكتبها المدير لا تُترجم تلقائياً، بل يمكن إضافة نصوص إنجليزية مستقلة من حقول `title_en`,`description_en`,`usage_instructions_en` واختيار `categories.title_en`. تبقى الروابط، الأكواد وبيانات التسليم كما كُتبت حرفياً.
+- توجد رسالة ترحيب إنجليزية مستقلة `home_template_en`، أما رسالة الترحيب العربية السابقة فتبقى كما هي. لم يتغير رصيد أو معرف أو مخزون أو عملية شراء في ملفات ترحيل V14.
+- الأداء: تحميل تفضيلات الرئيسية، القالب، الأسماء والأيقونات في استعلام واحد للـ bot_settings بدلاً من الاستعلام لكل زر؛ عرض تفاصيل المنتج بتجميع القراءات المستقلة؛ استبعاد استعلامات تسعير متكررة من صفحة تأكيد الشراء ومن قوائم المفضلة. لا توجد وعود بزمن استجابة محدد دون اختبار Cloudflare الحقيقي.
+- لترقية متجر موجود، يجب تطبيق `migrations/0011_product_visuals.sql` على D1 قبل استخدام النسخة الجديدة؛ ينفذ ذلك مسار النشر إذا كان مضبوطاً على `wrangler d1 migrations apply`.
 
-- From /admin → Customize Store Interface → Customize All Home Buttons, the owner can edit each Home button's Arabic and English names and its custom animated emoji icon, individually or reset them to defaults. All callback actions and permissions remain unchanged.
-- Home button icons use Telegram Bot API's `icon_custom_emoji_id` and gracefully fall back to ordinary buttons if unavailable. Existing page header emoji settings remain compatible.
-- Product, price and stock animated icons are editable globally; each product may override the product icon. Telegram supports one animated icon per inline button; separate product, price and stock animations appear in the product-detail message.
-- The language selector saves Arabic or English per user in D1 and updates the native Telegram command menu for that chat. An independent English welcome template and editable English product/category name, product description and usage instructions are provided. Owner-supplied Arabic descriptions and unique delivery credentials are not automatically altered or discarded.
-- D1 migration `0011_product_visuals.sql` adds only optional fields and English names for built-in categories. No customer balance, order, inventory item or previous purchase is deleted or rewritten.
-- Home button settings are retrieved in one query, and product-detail queries use concurrent reads for faster navigation. Exact end-user performance should be confirmed after deployment.
-- The in-Telegram wallet payment route for digital goods may violate Telegram Stars rules; review compliance before public sales.
+**تنبيه:** طريقة دفع المحفظة للمحتوى الرقمي داخل Telegram قد لا تتوافق مع قواعد Telegram Stars. لم يغير V14 مسار المدفوعات أو يضف تحايلاً جديداً.
+
+## V15 — إيموجي اسم الزر والضمان (عربي/إنجليزي)
+
+- داخل `/admin` ← **🎨 تخصيص واجهة المتجر** ← **تخصيص جميع أزرار الرئيسية** ← **تعديل الاسم العربي أو الإنجليزي**: اكتب الاسم وألصق فيه الإيموجي المتحرك الحقيقي في البداية أو النهاية (`💳 متجر` أو `متجر 💳`). يلتقط البوت `custom_emoji_id` من كيان تيليجرام ويتحقق، إن توفرت بيانات الملصق، أن الرمز متحرك أو فيديو وليس صورة ثابتة. تُحفظ معرّفات الإيموجي مستقلة عن العنوان. عند إرسال الزر، يستخدم البوت `icon_custom_emoji_id` ويمنع ازدواجية الرمز، ويعيد التسمية الأصلية بإيموجي Unicode عادي إذا رفضت API صلاحية الأيقونة. تدعم استعادة زر واحد/جميع الأزرار أيضاً إعادة هذه الحقول إلى الافتراضية.
+- **حدود تيليجرام الحقيقية:** لا يدعم نص `InlineKeyboardButton.text` كيانات الإيموجي المتحرك داخل الاسم. يتيح Bot API فقط `icon_custom_emoji_id` المعروض *قبل نص الزر*. مكان الأيقونة الفعلي (خصوصاً مع RTL) والحركة وسرعتها يتحكم بها تطبيق تيليجرام وإصدار المستخدم والصلاحيات؛ لا يستطيع كود البوت فرض تحريك الأيقونة أو وضعها فعلياً بعد النص. تحتفظ نسخة Unicode الاحتياطية بترتيب البداية/النهاية كما كتبه المدير.
+- في `/admin` ← **📦 المنتجات والأسعار** ← **اختر منتجاً** ← **🛡️ حالة الضمان**: اختر **✅ يوجد ضمان** أو **❌ لا يوجد ضمان** أو **🙈 إخفاء حقل الضمان**. تستطيع تحرير تفاصيل اختيارية بالعربي والإنجليزي. عند إظهار الضمان، يُعرض في تفاصيل المنتج قبل زر الشراء وفي شاشة التأكيد، وفي حالة الرصيد غير الكافي، ويُحفظ كنسخة ثابتة في إيصال الشراء عند اكتماله. عند اختيار «لا يوجد ضمان»، لا تُعرض أي تفاصيل ضمان سابقة. إذا كانت لغة المستخدم إنجليزية ولم تكتب تفاصيل إنجليزية، يظهر عنوان الضمان بالإنجليزية دون عرض وصف عربي.
+- المظهر الافتراضي لكافة المنتجات القديمة لا يتغيّر: `warranty_visible=0` حتى يفعّل المدير الحالة. بيانات الشراء السابقة والرصيد والمخزون والأكواد لا تتغير.
+- ترحيل قاعدة البيانات الجديد: `migrations/0012_product_warranty.sql`. يجب تشغيل ترحيلات D1 قبل بدء Worker الجديد. يحوي الترحيل أعمدة اختيارية إضافية فقط في `products` و`wallet_purchases`، دون حذف أو تغيير بيانات قديمة.
+- للتحقق: `npm test` (98 اختباراً). النشر عبر GitHub Actions الذي يديره صاحب المتجر؛ لا تُنفّذ خطوات نشر أو تعديلات على الأرصدة الحقيقية أثناء رفع المصدر إلى GitHub.

@@ -6,14 +6,27 @@ import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './setting
 import {usdRate,receiverFor} from './wallet.js';
 import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,preserveCustomEmojiInTemplate} from './presentation.js';
 import {home as customerHomePreview} from './ui.js';
+import {warrantyLine} from './warranty.js';
+import {languageOf,choice} from './i18n.js';
 import {restrictionLabel} from './moderation.js';
 import {HOME_BUTTONS,ICON_SLOTS,homeSettingKey,productIconKey,loadVisualSettings,resolvedHomeButton} from './home-buttons.js';
 
 const adminBack=[button('🛡️ لوحة المدير','admin')];
 const backTo=(destination)=>[button('⬅️ رجوع',destination)];
 
+// A custom emoji may be a static image. Verify when Telegram gives us sticker
+// metadata; client-side animation and position still cannot be forced by a bot.
+async function isStaticCustomEmoji(env,id){
+  if(!/^\d{10,30}$/.test(String(id||'')))return false;
+  try{
+    const stickers=await telegram(env,'getCustomEmojiStickers',{custom_emoji_ids:[String(id)]});
+    return Array.isArray(stickers)&&stickers.length>0&&!stickers[0].is_animated&&!stickers[0].is_video;
+  }catch{return false;} // transient Telegram verification failure is not an edit blocker
+}
+
+
 export function adminRoute(data){
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -38,7 +51,7 @@ async function homeButtonDetail(db,env,uid,key,messageId=null){
   const visual=await loadVisualSettings(db);
   const ar=resolvedHomeButton(visual,key,'ar');
   const en=resolvedHomeButton(visual,key,'en');
-  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n🇬🇧 English: ${en.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n\nالتغيير يخص اسم الزر ورمزه فقط؛ مساره وصلاحياته لا تتغير.`,keyboard(
+  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n🇬🇧 English: ${en.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
     [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
     [button('✏️ Edit English label',`admin_setting_edit:${homeSettingKey(key,'label_en')}`)],
     [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
@@ -117,6 +130,8 @@ const PRODUCT_FIELDS={
   stock:{label:'📦 المخزون',integer:true,min:0,max:1000000,nullable:true},
   duration_months:{label:'🗓️ المدة بالأشهر',integer:true,min:1,max:120,nullable:true},
   delivery_instructions:{label:'📦 تعليمات التسليم الخاصة',max:1800},
+  warranty_terms_ar:{label:'🛡️ تفاصيل الضمان بالعربي (اختياري)',max:500},
+  warranty_terms_en:{label:'🛡️ English warranty details (optional)',max:500},
 };
 function validatedProductValue(field,text){
   const f=PRODUCT_FIELDS[field];if(!f)return {ok:false,message:'حقل غير مدعوم.'};
@@ -139,6 +154,7 @@ async function productDetail(db,env,uid,id,messageId=null){
   for(const fields of [['title','description'],['title_en','description_en'],['price_iqd','stock'],['duration_months','usage_instructions'],['usage_instructions_en'],['delivery_shared_text','delivery_instructions']])
     rows.push(fields.map(f=>button(PRODUCT_FIELDS[f].label,`admin_product_field:${id}:${f}`)));
   rows.push([button('✨ رمز متحرك خاص بهذا المنتج',`admin_product_icon:${id}`,'primary')]);
+  rows.push([button('🛡️ حالة الضمان: '+(p.warranty_visible?(p.warranty_available?'يوجد ضمان':'لا يوجد ضمان'):'مخفي'),`admin_product_warranty:${id}`,'primary')]);
   rows.push([button('📷 إضافة/تغيير صورة المنتج',`admin_product_photo:${id}`,'primary'),button('🗑️ حذف الصورة',`admin_product_photo_delete:${id}`,'danger')]);
   rows.push([button('📦 تسليم محتوى ثابت',`admin_product_mode:${id}:shared`,'success'),button('🔑 تسليم كود فريد',`admin_product_mode:${id}:unique`,'primary')]);
   rows.push([button('➕ إضافة أكواد (كود في كل سطر)',`admin_product_code:${id}`,'success'),button('⏸️ إيقاف الشراء التلقائي',`admin_product_mode:${id}:disabled`,'danger')]);
@@ -147,7 +163,26 @@ async function productDetail(db,env,uid,id,messageId=null){
              button(p.featured?'⭐ إلغاء التمييز':'🌟 تمييز المنتج',`admin_product_toggle:${id}:featured`)]);
   rows.push(backTo('admin_products:0'),adminBack);
   const codes=await db.prepare('SELECT COUNT(*) n FROM product_delivery_items WHERE product_id=? AND used_by_purchase_id IS NULL').bind(id).first();
-  return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 سعر المحفظة: ${p.price_iqd?formatIQD(p.price_iqd):'لم يحدد'}\n📷 الصورة: ${p.photo_file_id?'✅ محفوظة':'—'}\n✨ رمز المنتج: ${p.custom_emoji_id?'✅ مخصص':'الرمز العام'}\n📖 طريقة الاستخدام: ${short(p.usage_instructions||'لم تضف',100)}\n🇬🇧 English product name: ${short(p.title_en||'—',100)}\n📦 طريقة التسليم: ${p.fulfillment_mode}\n🔑 أكواد غير مستخدمة: ${codes?.n||0}\n📦 المحتوى الثابت: ${p.delivery_shared_text?'✅ محفوظ':'—'}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
+  return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 سعر المحفظة: ${p.price_iqd?formatIQD(p.price_iqd):'لم يحدد'}\n📷 الصورة: ${p.photo_file_id?'✅ محفوظة':'—'}\n✨ رمز المنتج: ${p.custom_emoji_id?'✅ مخصص':'الرمز العام'}\n📖 طريقة الاستخدام: ${short(p.usage_instructions||'لم تضف',100)}\n🇬🇧 English product name: ${short(p.title_en||'—',100)}\n📦 طريقة التسليم: ${p.fulfillment_mode}\n🔑 أكواد غير مستخدمة: ${codes?.n||0}\n📦 المحتوى الثابت: ${p.delivery_shared_text?'✅ محفوظ':'—'}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n🛡️ الضمان: ${p.warranty_visible?(p.warranty_available?'يوجد ضمان':'لا يوجد ضمان'):'مخفي'}\n📋 تفاصيل الضمان: ${short(p.warranty_terms_ar||'—',140)}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
+}
+async function warrantyMenu(db,env,uid,id,messageId=null){
+  const p=await db.prepare('SELECT id,title,warranty_visible,warranty_available,warranty_terms_ar,warranty_terms_en FROM products WHERE id=?').bind(id).first();
+  if(!p)return sendOrEditText(env,uid,choice(env,'المنتج غير موجود.','Product not found.'),keyboard(adminBack),messageId);
+  const en=languageOf(env)==='en';
+  const currently=p.warranty_visible
+    ?(p.warranty_available?choice(env,'✅ يوجد ضمان','✅ Warranty included'):choice(env,'❌ لا يوجد ضمان','❌ No warranty'))
+    :choice(env,'🙈 مخفي','🙈 Hidden');
+  const summary=warrantyLine(p,languageOf(env))||choice(env,'حقل الضمان مخفي عن العملاء.','The warranty field is hidden from customers.');
+  const title=en
+    ?`🛡️ Product Warranty #${id}\n\nProduct: ${short(p.title,90)}\nStatus: ${currently}\n\n${summary}\n\nChoose the warranty status and optionally set warranty terms in Arabic and English. No old warranty terms are shown when you select No warranty.`
+    :`🛡️ إدارة ضمان المنتج #${id}\n\nالمنتج: ${short(p.title,90)}\nالحالة: ${currently}\n\n${summary}\n\nاختر حالة الضمان، وتقدر تضيف وصفاً اختيارياً بالعربي والإنجليزي. إذا اخترت «لا يوجد ضمان» لا تُعرض تفاصيل ضمان قديمة.`;
+  return sendOrEditText(env,uid,title,keyboard(
+    [button(choice(env,'✅ يوجد ضمان','✅ Warranty included'),`admin_product_warranty_set:${id}:yes`,'success')],
+    [button(choice(env,'❌ لا يوجد ضمان','❌ No warranty'),`admin_product_warranty_set:${id}:no`,'danger')],
+    [button(choice(env,'🙈 إخفاء حقل الضمان','🙈 Hide warranty field'),`admin_product_warranty_set:${id}:hidden`)],
+    [button(choice(env,'✏️ تفاصيل الضمان بالعربي','✏️ Arabic warranty terms'),`admin_product_field:${id}:warranty_terms_ar`)],
+    [button('✏️ English warranty details',`admin_product_field:${id}:warranty_terms_en`)],
+    [button(choice(env,'⬅️ المنتج','⬅️ Product'),`admin_product:${id}`)],adminBack),messageId,{preserveText:en});
 }
 async function categories(db,env,uid,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
@@ -298,7 +333,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_home_button_reset:')){
     const key=data.split(':')[1];
     if(!HOME_BUTTONS.some(b=>b.id===key))return true;
-    await Promise.all(['label_ar','label_en','icon'].map(field=>updateSetting(db,homeSettingKey(key,field),'',uid)));
+    await Promise.all(['label_ar','label_en','icon','inline_ar','inline_en'].map(field=>updateSetting(db,homeSettingKey(key,field),'',uid)));
     await audit(db,uid,'reset_home_button','ui',0);
     await homeButtonDetail(db,env,uid,key,messageId);
   }
@@ -311,7 +346,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data==='admin_home_reset_all_confirm'){
     const session=await getSession(db,uid);
     if(session?.action!=='owner_home_buttons_reset')return true;
-    for(const b of HOME_BUTTONS)for(const field of ['label_ar','label_en','icon'])
+    for(const b of HOME_BUTTONS)for(const field of ['label_ar','label_en','icon','inline_ar','inline_en'])
       await updateSetting(db,homeSettingKey(b.id,field),'',uid);
     await clearSession(db,uid);
     await audit(db,uid,'reset_all_home_buttons','ui',0);
@@ -382,7 +417,9 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     if(!SETTING_FIELDS[key]||SETTING_FIELDS[key].toggle)return true;
     if(SETTING_FIELDS[key]?.internal)return true;
     await setSession(db,uid,'owner_setting',{key});
-    await sendText(env,uid,`✏️ تعديل ${SETTING_FIELDS[key].label}\n\nأرسل النص الجديد (حد أقصى ${SETTING_FIELDS[key].max} حرف).\nلمسح الحقل اكتب /empty. وللإلغاء اكتب /cancel.`);
+    const labelHint=/^home_button_[a-z_]+_label_(?:ar|en)$/.test(key)
+      ?'\n\n✨ تگدر ترسل اسم الزر والإيموجي المتحرك الحقيقي برسالة وحدة، مثل «💳 متجر» أو «متجر 💳». راح ينحفظ رمز تيليجرام الحقيقي تلقائياً. أما موقعه وحركته داخل الزر فيتحكم به تطبيق تيليجرام.':'';
+    await sendText(env,uid,`✏️ تعديل ${SETTING_FIELDS[key].label}\n\nأرسل النص الجديد (حد أقصى ${SETTING_FIELDS[key].max} حرف).${labelHint}\nلمسح الحقل اكتب /empty. وللإلغاء اكتب /cancel.`);
   }
   else if(data.startsWith('admin_setting:'))await settingDetail(db,env,uid,data.substring('admin_setting:'.length),messageId);
   else if(data.startsWith('admin_products'))await products(db,env,uid,Math.min(100,positiveInt(data.split(':')[1])??0),messageId);
@@ -420,11 +457,23 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await setSession(db,uid,'owner_product_code',{id});
     await sendText(env,uid,'🔑 أرسل كوداً واحداً، أو حتى 50 كوداً دفعة واحدة (كود في كل سطر).\n\nكل عملية شراء تستلم كوداً مختلفاً، والأكواد المباعة لا تعود للمخزون. لن تتكرر الأكواد المتطابقة.\n\nللإلغاء /cancel.');
   }
+  else if(data.startsWith('admin_product_warranty_set:')){
+    const [,rawId,mode]=data.split(':');const id=positiveInt(rawId);
+    if(!id||!['yes','no','hidden'].includes(mode))return true;
+    await db.prepare('UPDATE products SET warranty_visible=?,warranty_available=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')
+      .bind(mode==='hidden'?0:1,mode==='yes'?1:0,id).run();
+    await audit(db,uid,'set_product_warranty','product',id);
+    await warrantyMenu(db,env,uid,id,messageId);
+  }
+  else if(data.startsWith('admin_product_warranty:')){
+    const id=positiveInt(data.split(':')[1]);if(!id)return true;
+    await warrantyMenu(db,env,uid,id,messageId);
+  }
   else if(data.startsWith('admin_product_field:')){ 
     const [, id,field]=data.split(':');
     if(!PRODUCT_FIELDS[field] || !positiveInt(id))return true;
     await setSession(db,uid,'owner_product_field',{id:Number(id),field});
-    await sendText(env,uid,`✏️ تعديل ${PRODUCT_FIELDS[field].label} للمنتج #${id}\nأرسل القيمة الجديدة.${PRODUCT_FIELDS[field].nullable?'\nاكتب - لإلغاء التحديد.':''}\nللإلغاء /cancel.`);
+    await sendText(env,uid,`✏️ تعديل ${PRODUCT_FIELDS[field].label} للمنتج #${id}\nأرسل القيمة الجديدة.${PRODUCT_FIELDS[field].nullable?'\nاكتب - لإلغاء التحديد.':''}${field.startsWith('warranty_terms_')?'\nاكتب /empty لمسح تفاصيل الضمان.':''}\nللإلغاء /cancel.`);
   }
   else if(data.startsWith('admin_product_categories:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
@@ -479,7 +528,8 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
 
 export async function handleAdminText(db,env,uid,session,message){
   if(!isAdmin(env,uid))return false;
-  const text=String(message.text??'').trim();
+  const originalText=String(message.text??'');
+  const text=originalText.trim();
   if(session.action==='owner_product_photo'){
     const id=positiveInt(session.payload?.id);
     if(!id)return true;
@@ -556,10 +606,32 @@ export async function handleAdminText(db,env,uid,session,message){
       }
     }
     if(SETTING_FIELDS[key]?.internal){await sendText(env,uid,'❌ لا يمكن تغيير هذا الحقل مباشرة. استخدم صفحة عداد المستخدمين.');return true;}
-    await updateSetting(db,key,valid.value,uid);
+    // Custom emoji pasted INTO a home-button name: capture the real entity id
+    // along with the ordinary Unicode glyph (which is the safe client fallback).
+    const namedHome=/^home_button_([a-z_]+)_label_(ar|en)$/.exec(key);
+    const custom=(message.entities||[]).find(e=>e.type==='custom_emoji' && /^\d{10,30}$/.test(String(e.custom_emoji_id))
+      && Number.isInteger(e.offset) && Number.isInteger(e.length) && e.offset>=0 && e.length>0 && e.offset+e.length<=originalText.length);
+    const checkId=custom?.custom_emoji_id || (SETTING_FIELDS[key]?.customEmoji?valid.value:null);
+    if(checkId && await isStaticCustomEmoji(env,checkId)){
+      await sendText(env,uid,'⚠️ هذا رمز تيليجرام ثابت مو متحرك. أرسل إيموجي متحرك أو فيديو إيموجي حقيقي، أو /cancel للإلغاء.');
+      return true;
+    }
+    if(namedHome && HOME_BUTTONS.some(b=>b.id===namedHome[1])){
+      const symbol=custom?originalText.slice(custom.offset,custom.offset+custom.length):'';
+      const inlineKey=homeSettingKey(namedHome[1],`inline_${namedHome[2]}`);
+      const iconKey=homeSettingKey(namedHome[1],'icon');
+      if(symbol && !text.replace(symbol,'').trim()){
+        await sendText(env,uid,'❌ اكتب اسم الزر ويا الرمز المتحرك؛ ما يصير اسم الزر رمز فقط.');return true;
+      }
+      // Use one atomic D1 batch, so the label and its emoji never mismatch.
+      const updates=[[key,valid.value],[inlineKey,symbol.slice(0,16)]];
+      if(custom)updates.push([iconKey,String(custom.custom_emoji_id)]);
+      await db.batch(updates.map(([setting,value])=>db.prepare(`INSERT INTO bot_settings(key,value,updated_by) VALUES(?,?,?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).bind(setting,value,uid)));
+    }else await updateSetting(db,key,valid.value,uid);
     await audit(db,uid,'edit_'+key,'setting',0);
     await clearSession(db,uid);
-    await sendText(env,uid,`✅ تم حفظ الإعداد: ${SETTING_FIELDS[key].label}`,keyboard(
+    await sendText(env,uid,`✅ تم حفظ الإعداد: ${SETTING_FIELDS[key].label}${namedHome&&custom?'\n✨ تم التعرف على الرمز من داخل اسم الزر. حركة الأيقونة وموضعها حسب دعم تطبيق تيليجرام.':''}`,keyboard(
       [button('🎨 تخصيص الواجهة','admin_visuals','primary')],
       [button('⚙️ جميع الإعدادات','admin_settings:0','primary')],adminBack));
     return true;
@@ -577,12 +649,12 @@ export async function handleAdminText(db,env,uid,session,message){
   }
   if(session.action==='owner_product_field'){
     const {id,field}=session.payload||{};
-    const valid=validatedProductValue(field,text==='/empty'&&field.endsWith('_en')?'':text);
+    const valid=validatedProductValue(field,text==='/empty'&&(field.endsWith('_en')||field.startsWith('warranty_terms_'))?'':text);
     if(!valid.ok){await sendText(env,uid,'❌ '+valid.message);return true;}
     const res=await db.prepare(`UPDATE products SET ${field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(valid.value,id).run();
     await clearSession(db,uid);
     if(res.meta?.changes)await audit(db,uid,'edit_'+field,'product',id);
-    await sendText(env,uid,res.meta?.changes?'✅ تم تحديث المنتج.':'لم يتم العثور على المنتج.',keyboard([button('📦 تفاصيل المنتج',`admin_product:${id}`)],adminBack));
+    await sendText(env,uid,res.meta?.changes?'✅ تم تحديث المنتج.':'لم يتم العثور على المنتج.',keyboard([button('📦 تفاصيل المنتج',`admin_product:${id}`)],...(String(field).startsWith('warranty_')?[[button('🛡️ الضمان',`admin_product_warranty:${id}`)]]:[]),adminBack));
     return true;
   }
   if(session.action==='owner_category_field'){

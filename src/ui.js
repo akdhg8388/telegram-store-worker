@@ -1,3 +1,4 @@
+import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
 import {sendOrEditText} from './telegram.js';
@@ -95,7 +96,8 @@ export async function productView(db,env,uid,id,messageId=null){
   const text=languageOf(env)==='en'
     ?`🛍️ ${short(languageOf(env)==='en'&&p.title_en||p.title,150)}\n\n${desc}\n\n⏳ Duration: ${p.duration_months?p.duration_months+' month(s)':'As specified for the service'}\n💰 Price: ${shown}\n📦 ${stockText}\n\n${status.ready?'✅ Instant delivery after wallet payment.':'⛔ Purchasing is disabled until the owner configures delivery.'}${visual.purchase_instructions?'\n\n'+short(visual.purchase_instructions,700):''}`
     :`🛍️ ${short(languageOf(env)==='en'&&p.title_en||p.title,150)}\n\n${desc}\n\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب تفاصيل الخدمة'}\n💰 السعر: ${shown}\n📦 ${stockText}\n\n${status.ready?'✅ يتم التسليم تلقائياً بعد الشراء من المحفظة.':'⛔ لا يمكن الشراء حتى يجهّز المدير بيانات التسليم.'}${visual.purchase_instructions?'\n\n'+short(visual.purchase_instructions,700):''}`;
-  const decorated=decorateProductText(text,{product:emojiId(icon),price:emojiId(visual.price_custom_emoji_id),stock:emojiId(visual.stock_custom_emoji_id)});
+  const warranty=warrantyLine(p,languageOf(env));
+  const decorated=decorateProductText(warranty?text+'\n\n'+warranty:text,{product:emojiId(icon),price:emojiId(visual.price_custom_emoji_id),stock:emojiId(visual.stock_custom_emoji_id)});
   return sendOrEditText(env,uid,decorated.text,keyboard(
     [withButtonIcon(button(stockText,`product:${id}`,status.ready?'success':'danger'),visual.stock_custom_emoji_id)],
     status.ready?[withButtonIcon(button('🛒 شراء فوري من المحفظة',`buy:${id}`,'success'),icon)]:[],

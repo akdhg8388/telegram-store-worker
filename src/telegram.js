@@ -3,14 +3,18 @@ const BASE = 'https://api.telegram.org/bot';
 export async function telegram(env, method, params) {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN is missing');
   params=translateTelegramParams(method,params,languageOf(env));
+  // Internal fallbacks must never go over the Telegram Bot API wire.
+  const request={...params};
+  if(request.reply_markup?.inline_keyboard)request.reply_markup={...request.reply_markup,
+    inline_keyboard:request.reply_markup.inline_keyboard.map(row=>row.map(({_emoji_fallback_text,...btn})=>btn))};
   const response = await fetch(`${BASE}${env.TELEGRAM_BOT_TOKEN}/${method}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request)
   });
   const data = await response.json().catch(() => null);
   if (!response.ok || data?.ok !== true) {
     // Unsupported custom emoji icons should never make the store inaccessible.
     if(params.reply_markup?.inline_keyboard && /custom.emoji|icon_custom_emoji_id/i.test(String(data?.description||''))){
-      const cleaned={...params,reply_markup:{...params.reply_markup,inline_keyboard:params.reply_markup.inline_keyboard.map(row=>row.map(({icon_custom_emoji_id,...btn})=>btn))}};
+      const cleaned={...params,reply_markup:{...params.reply_markup,inline_keyboard:params.reply_markup.inline_keyboard.map(row=>row.map(({icon_custom_emoji_id,_emoji_fallback_text,...btn})=>({...btn,text:_emoji_fallback_text||btn.text})))}};
       if(JSON.stringify(cleaned.reply_markup)!==JSON.stringify(params.reply_markup))return telegram(env,method,cleaned);
     }
     const err=new Error(`Telegram ${method}: ${response.status}: ${data?.description || 'unexpected response'}`);

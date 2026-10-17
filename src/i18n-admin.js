@@ -1,6 +1,10 @@
 // Static phrases for owner administration, setup, support and moderation.
 // No translated phrase changes an SQL field, stored user content or callback.
 export const ADMIN_EN=[
+['🛡️ حالة الضمان:','🛡️ Warranty:'],['يوجد ضمان','Warranty included'],['لا يوجد ضمان','No warranty'],['مخفي','Hidden'],
+['🛡️ الضمان:','🛡️ Warranty:'],['📋 تفاصيل الضمان:','📋 Warranty details:'],
+['🛡️ الضمان','🛡️ Warranty'],['✏️ تفاصيل الضمان بالعربي','✏️ Arabic warranty terms'],
+
 ['🛡️ لوحة تحكم المدير — خاصة بك','🛡️ Admin Control Panel — Owner Only'],
 ['✅ تم التحقق من حساب المدير. لديك صلاحية إدارة هذا المتجر.','✅ Owner identity verified. You can manage this store.'],
 ['💳 طلبات الشحن المعلقة:','💳 Pending top-ups:'],['🛍️ طلبات الشراء المعلقة:','🛍️ Pending orders:'],

@@ -10,7 +10,7 @@ import {isTopupEnabled} from '../src/wallet.js';
 const env={ADMIN_ID:'991',TELEGRAM_BOT_TOKEN:'FAKE_TEST_BOT_TOKEN',ENABLE_MANUAL_TOPUPS:'false',STORE_NAME:'My Store'};
 function fixture(){
   const conn=new DatabaseSync(':memory:');
-  for(const n of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql','0011_product_visuals.sql'])
+  for(const n of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql','0011_product_visuals.sql','0012_product_warranty.sql'])
     conn.exec(readFileSync(new URL('../migrations/'+n,import.meta.url),'utf8'));
   conn.prepare("INSERT INTO users(tg_id,first_name) VALUES(991,'Owner'),(101,'Client')").run();
   const db={prepare(sql){const stmt=conn.prepare(sql);let args=[];const wrapper={

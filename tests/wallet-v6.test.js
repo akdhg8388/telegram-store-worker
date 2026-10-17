@@ -7,7 +7,7 @@ import {handleAdminCallback} from '../src/admin-controls.js';
 import {flushOutbox} from '../src/telegram.js';
 import {formatUSD,formatQuote,quoteFromUSD,quoteMinor,parseCustomMinor,usdRate,baghdadDate} from '../src/wallet.js';
 
-const migrations=['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql','0011_product_visuals.sql'];
+const migrations=['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql','0011_product_visuals.sql','0012_product_warranty.sql'];
 function setup(migrate=true){
   const conn=new DatabaseSync(':memory:');
   for(const file of migrate?migrations:migrations.slice(0,5))

@@ -31,6 +31,9 @@ export function homeButtonSettings(){
     result[homeSettingKey(x.id,'label_ar')]={label:`✏️ اسم زر ${x.ar} بالعربي`,max:52};
     result[homeSettingKey(x.id,'label_en')]={label:`✏️ English label for ${x.en}`,max:52};
     result[homeSettingKey(x.id,'icon')]={label:`✨ رمز زر ${x.ar}`,max:30,customEmoji:true};
+    // Internal Unicode fallbacks preserve the glyph's exact position in edited names.
+    result[homeSettingKey(x.id,'inline_ar')]={label:'Internal emoji fallback (Arabic)',max:16,internal:true,internalText:true};
+    result[homeSettingKey(x.id,'inline_en')]={label:'Internal emoji fallback (English)',max:16,internal:true,internalText:true};
   }
   for(const x of ICON_SLOTS)result[productIconKey(x.id)]={label:x.ar,max:30,customEmoji:true};
   return result;
@@ -47,21 +50,34 @@ export function resolvedHomeButton(settings,id,lang='ar'){
   const title=String(settings[key]||'').trim()||def[lang==='en'?'en':'ar'];
   const iconKey=homeSettingKey(id,'icon');
   const icon=emojiId(Object.hasOwn(settings,iconKey)?settings[iconKey]:(def.legacy?settings[def.legacy]:''));
-  return {text:short(title,52),icon};
+  const symbol=String(settings[homeSettingKey(id,lang==='en'?'inline_en':'inline_ar')]||'');
+  return {text:short(title,52),icon,inlineSymbol:icon&&symbol&&title.includes(symbol)?symbol:null};
+}
+// Telegram button texts have no message entities. A custom emoji must be
+// attached as an icon (Telegram places it BEFORE the text). We remove the
+// matching Unicode placeholder to avoid showing the same emoji twice.
+// Keep the original label for the API permission fallback and old clients.
+export function applyHomeButtonVisual(buttonObject,visual){
+  if(!visual.icon)return buttonObject;
+  buttonObject.icon_custom_emoji_id=visual.icon;
+  if(visual.inlineSymbol){
+    const title=visual.text.replace(visual.inlineSymbol,'').trim();
+    if(title){
+      buttonObject._emoji_fallback_text=visual.text;
+      buttonObject.text=title;
+    }
+  }
+  return buttonObject;
 }
 export function homeActionButton(settings,id,lang='ar',style='primary'){
   const def=HOME_BUTTONS.find(x=>x.id===id);
   if(!def)return null;
   const visual=resolvedHomeButton(settings,id,lang);
-  const out=button(visual.text,def.action,style);
-  if(visual.icon)out.icon_custom_emoji_id=visual.icon;
-  return out;
+  return applyHomeButtonVisual(button(visual.text,def.action,style),visual);
 }
 export function homeUrlButton(settings,id,url,lang='ar'){
   const visual=resolvedHomeButton(settings,id,lang);
-  const out=urlButton(visual.text,url);
-  if(visual.icon)out.icon_custom_emoji_id=visual.icon;
-  return out;
+  return applyHomeButtonVisual(urlButton(visual.text,url),visual);
 }
 export function withButtonIcon(item,id){
   const icon=emojiId(id);
