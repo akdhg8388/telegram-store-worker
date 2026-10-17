@@ -127,12 +127,18 @@ async function handleMessage(db,env,ctx,message){
     }
     return ui.home(db,env,uid);
   }
+  // Telegram three-line menu sends slash commands (not a permanent ReplyKeyboard).
+  if(text==='/menu'){await clearSession(db,uid);return ui.home(db,env,uid)}
+  if(text==='/shop'){await clearSession(db,uid);return ui.categories(db,env,uid)}
+  if(text==='/profile'){await clearSession(db,uid);return ui.profile(db,env,uid)}
+  if(text==='/history'||text==='/transactions'){await clearSession(db,uid);return ui.transactions(db,env,uid)}
+  if(text==='/favorites'){await clearSession(db,uid);return ui.favorites(db,env,uid)}
   if(text==='/cancel'){await clearSession(db,uid);return ui.home(db,env,uid)}
   if(text==='/admin')return adminMenu(db,env,uid);
-  if(text==='/orders')return ui.orders(db,env,uid);
-  if(text==='/wallet')return ui.wallet(db,env,uid);
-  if(text==='/topup')return await isTopupEnabled(db,env)?ui.topupPresets(db,env,uid):ui.wallet(db,env,uid);
-  if(text==='/currency')return ui.currencyMenu(db,env,uid);
+  if(text==='/orders'){await clearSession(db,uid);return ui.orders(db,env,uid)}
+  if(text==='/wallet'){await clearSession(db,uid);return ui.wallet(db,env,uid)}
+  if(text==='/topup'){await clearSession(db,uid);return await isTopupEnabled(db,env)?ui.topupPresets(db,env,uid):ui.wallet(db,env,uid)}
+  if(text==='/currency'){await clearSession(db,uid);return ui.currencyMenu(db,env,uid)}
   if(text==='/support'){
     await setSession(db,uid,'support');
     const instructions=await getSetting(db,'support_instructions','');

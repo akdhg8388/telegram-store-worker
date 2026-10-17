@@ -1,3 +1,4 @@
+import {CUSTOMER_COMMANDS,OWNER_COMMANDS} from '../src/commands.js';
 // Configure Telegram webhook after the Worker is deployed and its secrets are present.
 // Never print tokens, webhook secret, or full Telegram API URLs.
 const cfToken=process.env.CLOUDFLARE_API_TOKEN;
@@ -53,3 +54,17 @@ const checkWebhook=await fetch('https://api.telegram.org/bot'+botToken+'/getWebh
 const info=await checkWebhook.json().catch(()=>null);
 if(!checkWebhook.ok||!info?.ok||info.result?.url!==workerUrl+'/webhook')throw new Error('Webhook verification did not match the deployed Worker.');
 console.log('Success. My Store webhook configured at '+workerUrl+'/webhook');
+
+async function applyBotSetting(method,payload){
+  const response=await fetch('https://api.telegram.org/bot'+botToken+'/'+method,{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)
+  });
+  const data=await response.json().catch(()=>null);
+  if(!response.ok||data?.ok!==true)throw new Error('Telegram '+method+' failed: '+(data?.description||response.status));
+}
+await applyBotSetting('setMyCommands',{scope:{type:'default'},commands:CUSTOMER_COMMANDS});
+const ownerId=Number(process.env.ADMIN_ID);
+if(!Number.isSafeInteger(ownerId)||ownerId<=0)throw new Error('Invalid ADMIN_ID');
+await applyBotSetting('setMyCommands',{scope:{type:'chat',chat_id:ownerId},commands:OWNER_COMMANDS});
+await applyBotSetting('setChatMenuButton',{menu_button:{type:'commands'}});
+console.log('Telegram command menu configured: public commands and private owner admin command.');

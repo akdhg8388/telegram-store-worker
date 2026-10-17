@@ -2,8 +2,8 @@ export const formatIQD = value => `${Number(value || 0).toLocaleString('en-US')}
 export const formatStars = value => `${Number(value || 0).toLocaleString('en-US')} ⭐`;
 export const short = (value, max = 700) => String(value ?? '').slice(0, max);
 export const positiveInt = value => /^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
-export const button = (text, callback_data, style) => ({ text, callback_data, ...(style ? { style } : {}) });
-export const urlButton = (text, url) => ({ text, url });
+export const button = (text, callback_data, style = 'primary') => ({ text, callback_data, style });
+export const urlButton = (text, url, style = 'primary') => ({ text, url, style });
 export const keyboard = (...rows) => ({ inline_keyboard: rows.filter(x => x?.length) });
 export const backRow = () => [button('↩️ الرجوع للرئيسية', 'home', 'danger')];
 export const moneyMethods = { asiacell: 'آسيا سيل', zaincash: 'زين كاش', zain_balance: 'رصيد زين', superqi: 'سوبر كي', binance: 'Binance' };

@@ -8,8 +8,8 @@ export async function home(db,env,uid,messageId=null) {
   const user = await getUser(db,uid);
   const featured=(await db.prepare('SELECT id,title,price_stars FROM products WHERE active=1 AND featured=1 ORDER BY id DESC LIMIT 2').all()).results??[];
   const rows = featured.map(p=>[button(`🌟 ${short(p.title,25)} — ${formatStars(p.price_stars)}`,`product:${p.id}`,'success')]);
-  rows.push([button('🛍️ المتجر','categories','success'),button('💎 المنتجات المميزة','featured','primary')]);
-  rows.push([button('💳 محفظتي','wallet','success'),button('👤 ملفي الشخصي','profile','primary')]);
+  rows.push([button('🛍️ المتجر','categories','success'),button('💎 المنتجات المميزة','featured','success')]);
+  rows.push([button('💳 محفظتي','wallet','success'),button('👤 ملفي الشخصي','profile','success')]);
   rows.push([button('💱 تغيير العملة 🇮🇶/🇺🇸','currency','primary')]);
   rows.push([button('📦 طلباتي','orders'),button('📜 سجل العمليات','transactions')]);
   rows.push([button('👥 الإحالات','referrals'),button('🌐 اللغة','language')]);
@@ -40,7 +40,7 @@ export async function products(db,env,uid,page=0,categoryId=null,query=null,feat
   let records;
   if(featuredOnly){records=(await db.prepare('SELECT * FROM products WHERE active=1 AND featured=1 ORDER BY id DESC LIMIT 10').all()).results??[];}
   else records=await listProducts(db,page,categoryId,query);
-  const rows=records.map(p=>[button(`${short(p.title,33)} — ${formatStars(p.price_stars)}${p.stock===0?' ❌':''}`,`product:${p.id}`)]);
+  const rows=records.map(p=>[button(`${p.stock===0?'🔴':'🟢'} ${short(p.title,29)} — ${formatStars(p.price_stars)} • ${p.stock===null?'حسب الطلب':p.stock}`,`product:${p.id}`,p.stock===0?'danger':'success')]);
   if(!featuredOnly && !query){
     const pages=[];
     const prefix=categoryId?`category:${categoryId}`:'products';
@@ -58,11 +58,14 @@ export async function productView(db,env,uid,id,messageId=null){
   const fav=await db.prepare('SELECT 1 AS yes FROM favorites WHERE user_tg_id=? AND product_id=?').bind(uid,id).first();
   const desc=short(p.description||'لا يوجد وصف إضافي.',1300);
   const purchaseInstructions=await getSetting(db,'purchase_instructions','');
-  const text=`🛍️ ${short(p.title,150)}\n\n${desc}\n\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب تفاصيل الخدمة'}\n💰 السعر: ${formatStars(p.price_stars)}\n📦 المخزون: ${p.stock===null?'متاح حسب التجهيز':p.stock>0?p.stock:'غير متوفر'}\n\n✅ تنفيذ الشراء يحتاج موافقة المدير، ثم الدفع عبر Telegram Stars.${purchaseInstructions?'\n\n'+short(purchaseInstructions,700):''}`;
+  const available=p.stock!==0;
+  const stockText=available?`🟢 متوفر • المخزون: ${p.stock===null?'حسب الطلب':p.stock}`:'🔴 غير متوفر • المخزون: 0';
+  const text=`🛍️ ${short(p.title,150)}\n\n${desc}\n\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب تفاصيل الخدمة'}\n💰 السعر: ${formatStars(p.price_stars)}\n📦 ${stockText}\n\n${available?'✅ الشراء بموافقة المدير ثم الدفع عبر Telegram Stars.':'⛔ نفد المخزون حالياً. يمكنك تحديث حالة المنتج لاحقاً.'}${purchaseInstructions?'\n\n'+short(purchaseInstructions,700):''}`;
   return sendOrEditText(env,uid,text,keyboard(
-    p.stock!==0?[button('🛒 طلب الشراء',`buy:${id}`,'success')]:[],
-    [button(fav?'💔 إزالة من المفضلة':'💗 إضافة للمفضلة',`favorite:${id}`)],
-    [button('🔄 تحديث',`product:${id}`),button('🛍️ الأقسام','categories')],backRow()),messageId);
+    [button(stockText,`product:${id}`,available?'success':'danger')],
+    available?[button('🛒 طلب الشراء',`buy:${id}`,'success')]:[],
+    [button(fav?'💔 إزالة من المفضلة':'💗 إضافة للمفضلة',`favorite:${id}`,'primary')],
+    [button('🔄 تحديث المخزون',`product:${id}`,'primary'),button('🛍️ الأقسام','categories','primary')],backRow()),messageId);
 }
 export async function walletSummary(db,uid){
   const u=await getUser(db,uid);
@@ -86,10 +89,11 @@ export async function profile(db,env,uid,messageId=null){
     db.prepare('SELECT count(*) n FROM referrals WHERE referrer_tg_id=?').bind(uid).first(),
     walletSummary(db,uid)
   ]);
-  return sendOrEditText(env,uid,`👤 الملف الشخصي — ${short(u?.first_name,60)}\n\n🪪 المعرّف: ${uid}\n💳 الرصيد: ${w.shown}\n👥 الإحالات: ${referrals?.n||0}\n🛒 المنتجات المشتراة: ${count?.n||0}\n🌐 العملة: ${w.currency}`,keyboard(
+  const role=isAdmin(env,uid)?'◀المسؤول▶':short(u?.first_name||'العميل',60);
+  return sendOrEditText(env,uid,`👤 الملف الشخصي — ${role}\n\n🪪 المعرّف — ${uid}\n💳 الرصيد — ${w.shown}\n👥 الإحالات — ${referrals?.n||0}\n🛒 المنتجات المشتراة — ${count?.n||0}`,keyboard(
     [button('💳 شحن الرصيد','topup','success')],
     [button('📦 طلباتي','orders','primary')],
-    [button('📜 سجل العمليات','transactions','primary')],
+    [button('📑 سجل العمليات','transactions','primary')],
     [button('💗 المفضلة','favorites','primary')],backRow()),messageId);
 }
 export async function wallet(db,env,uid,messageId=null){
@@ -118,7 +122,7 @@ export async function orders(db,env,uid,messageId=null){
 }
 export async function favorites(db,env,uid,messageId=null){
   const items=(await db.prepare('SELECT p.id,p.title,p.price_stars FROM favorites f JOIN products p ON p.id=f.product_id WHERE f.user_tg_id=? AND p.active=1 ORDER BY p.id DESC LIMIT 20').bind(uid).all()).results??[];
-  return sendOrEditText(env,uid,items.length?'💗 منتجاتك المفضلة:':'ليس لديك منتجات مفضلة.',keyboard(
+  return sendOrEditText(env,uid,items.length?'💗 المفضلة — منتجاتك المحفوظة:':'💗 المفضلة\n\nليس لديك منتجات مفضلة.',keyboard(
     ...items.map(p=>[button(`${short(p.title,35)} — ${formatStars(p.price_stars)}`,`product:${p.id}`)]),backRow()),messageId);
 }
 export async function topupPresets(db,env,uid,messageId=null){
