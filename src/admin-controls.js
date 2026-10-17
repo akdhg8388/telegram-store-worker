@@ -1,5 +1,6 @@
 import {button,keyboard,short,formatStars,formatIQD,positiveInt,isAdmin} from './common.js';
-import {sendText,sendOrEditText} from './telegram.js';
+import {sendText,sendOrEditText,telegram} from './telegram.js';
+import {updateBotProfilePicture} from './bot-profile.js';
 import {setSession,getSession,clearSession,audit,getUser} from './database.js';
 import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './settings.js';
 import {usdRate,receiverFor} from './wallet.js';
@@ -11,7 +12,7 @@ const adminBack=[button('🛡️ لوحة المدير','admin')];
 const backTo=(destination)=>[button('⬅️ رجوع',destination)];
 
 export function adminRoute(data){
-  return /^(?:admin_visuals|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function stats(db,env,uid,messageId=null){
@@ -30,7 +31,7 @@ async function stats(db,env,uid,messageId=null){
 
 async function settings(db,env,uid,page=0,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
-  const entries=Object.entries(SETTING_FIELDS);
+  const entries=Object.entries(SETTING_FIELDS).filter(([,def])=>!def.internal);
   const pageSize=6, offset=Math.max(0,Math.min(page,Math.ceil(entries.length/pageSize)-1))*pageSize;
   const rows=entries.slice(offset,offset+pageSize).map(([key,def])=>[button(def.label,`admin_setting:${key}`)]);
   const nav=[];
@@ -45,10 +46,12 @@ async function settingDetail(db,env,uid,key,messageId=null){
   const def=SETTING_FIELDS[key];if(!def)return reply('الإعداد غير معروف.');
   const fallback=key==='home_template'?DEFAULT_HOME_TEMPLATE:key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':key==='manual_topups_enabled'?env.ENABLE_MANUAL_TOPUPS||'false':'';
   const value=await getSetting(db,key,fallback||'');
-  const rows=def.toggle?[[button(value==='false'?(key==='manual_topups_enabled'?'✅ تشغيل الشحن':'✅ تشغيل استقبال الطلبات'):(key==='manual_topups_enabled'?'⏸️ إيقاف الشحن':'⏸️ إيقاف الطلبات الجديدة'),key==='manual_topups_enabled'?'admin_toggle_topups':'admin_toggle_store',value==='false'?'success':'danger')]]:[[button('✏️ تعديل','admin_setting_edit:'+key)]];
+  const rows=def.toggle?[[button(value==='false'?(key==='manual_topups_enabled'?'✅ تشغيل الشحن':key==='support_direct_enabled'?'✅ إظهار زر المسؤول':'✅ تشغيل استقبال الطلبات'):(key==='manual_topups_enabled'?'⏸️ إيقاف الشحن':key==='support_direct_enabled'?'🙈 إخفاء زر المسؤول':'⏸️ إيقاف الطلبات الجديدة'),key==='manual_topups_enabled'?'admin_toggle_topups':key==='support_direct_enabled'?'admin_toggle_support_direct':'admin_toggle_store',value==='false'?'success':'danger')]]:[[button('✏️ تعديل','admin_setting_edit:'+key)]];
+  if(key==='support_direct_enabled')rows.push([button('👤 إعداد حساب المسؤول','admin_setting:support_direct_username','primary')]);
   if(key==='home_template')rows.push([button('↩️ إعادة رسالة الترحيب الافتراضية','admin_visual_reset','danger')]);
+  if(def.botProfile)rows.push([button('🖼️ تعريف البوت','admin_bot_intro','primary')]);
   rows.push(backTo('admin_settings:0'),adminBack);
-  return reply(`${def.label}\n\nالقيمة الحالية:\n${short(value||'لم يتم التحديد بعد',1750)}\n\n${def.toggle?(key==='manual_topups_enabled'?'يمكن تعطيل الشحن دون إلغاء طلبات الشحن التي سبق إرسالها.':'الإيقاف يمنع إنشاء طلبات شراء جديدة ولا يلغي الطلبات السابقة.'):key==='home_template'?'الحقول الحقيقية: {store} {balance} {name} {id} {users} {instructions}. {balance} تعرض عملة واحدة حسب اختيار العميل. يمكنك إرسال رسالة تحتوي على إيموجي متحرك حقيقي داخل القالب.':def.customEmoji?'يمكنك لصق رقم custom_emoji_id أو إرسال رمز متحرك ليتعرف البوت على معرّفه. اكتب /empty للإزالة.':'اكتب نصاً جديداً عند الضغط على تعديل، أو كلمة /empty لمسح الحقول الاختيارية.'}`,keyboard(...rows));
+  return reply(`${def.label}\n\nالقيمة الحالية:\n${short(value||'لم يتم التحديد بعد',1750)}\n\n${def.toggle?(key==='manual_topups_enabled'?'يمكن تعطيل الشحن دون إلغاء طلبات الشحن التي سبق إرسالها.':key==='support_direct_enabled'?'يظهر زر فتح حساب المسؤول فقط عند تفعيله وإضافة اسم المستخدم الصحيح.':'الإيقاف يمنع إنشاء طلبات شراء جديدة ولا يلغي الطلبات السابقة.'):key==='home_template'?'الحقول الحقيقية: {store} {balance} {name} {id} {users} {instructions}. {balance} تعرض عملة واحدة حسب اختيار العميل. يمكنك إرسال رسالة تحتوي على إيموجي متحرك حقيقي داخل القالب.':def.customEmoji?'يمكنك لصق رقم custom_emoji_id أو إرسال رمز متحرك ليتعرف البوت على معرّفه. اكتب /empty للإزالة.':'اكتب نصاً جديداً عند الضغط على تعديل، أو كلمة /empty لمسح الحقول الاختيارية.'}`,keyboard(...rows));
 }
 
 async function products(db,env,uid,page=0,messageId=null){
@@ -166,7 +169,57 @@ async function topupSetup(db,env,uid,messageId=null){
 export async function handleAdminCallback(db,env,uid,data,messageId=null){
   if(!adminRoute(data) && !data.startsWith('admin_setting_edit:'))return false;
   if(!isAdmin(env,uid)){await sendText(env,uid,'⛔ هذا الإجراء غير متاح.');return true;}
-  if(data==='admin_visuals')await sendOrEditText(env,uid,`🎨 تخصيص واجهة المتجر
+  if(data==='admin_bot_intro') {
+    const [name,description,shortDescription]=await Promise.all([
+      getSetting(db,'bot_public_name',''),getSetting(db,'bot_public_description',''),getSetting(db,'bot_public_short_description','')]);
+    await sendOrEditText(env,uid,`🖼️ تعريف البوت قبل «ابدأ»\n\n🏷️ الاسم: ${short(name||'اسم البوت الحالي',120)}\n📝 الوصف: ${short(description||'غير محدد',400)}\n📃 المختصر: ${short(shortDescription||'غير محدد',150)}\n\nيمكن تعديل الاسم والوصفين مباشرة؛ تُرسل التغييرات إلى Telegram عند الحفظ.\n\n📷 صورة البوت الشخصية: يمكن تغييرها أو إزالتها هنا.\n⚠️ صورة وصف البداية الكبيرة منفصلة عن صورة الملف، ويجب ضبطها من @BotFather ← Edit Bot ← Edit Description Picture؛ لا توجد طريقة لها في Bot API.`,keyboard(
+      [button('🏷️ تعديل العنوان','admin_setting_edit:bot_public_name','primary')],
+      [button('📝 تعديل الوصف','admin_setting_edit:bot_public_description','primary')],
+      [button('📃 الوصف المختصر','admin_setting_edit:bot_public_short_description','primary')],
+      [button('📷 تغيير صورة البوت','admin_bot_photo_edit','success')],
+      [button('🗑️ إزالة الصورة الشخصية','admin_bot_photo_remove','danger')],
+      [button('👥 عداد المستخدمين','admin_counter','primary')],
+      [button('🛡️ لوحة المدير','admin','primary')]),messageId);
+  }
+  else if(data==='admin_bot_photo_edit') {
+    await setSession(db,uid,'owner_bot_profile_picture');
+    await sendText(env,uid,'📷 أرسل صورة جديدة بصيغة صورة تيليجرام، لتصبح الصورة الشخصية للبوت.\n\nملاحظة: صورة وصف البداية الكبيرة تتطلب BotFather.\nللإلغاء /cancel.');
+  }
+  else if(data==='admin_bot_photo_remove') {
+    try {await telegram(env,'removeMyProfilePhoto',{});
+      await audit(db,uid,'remove_bot_profile_photo','bot',0);
+      await sendOrEditText(env,uid,'✅ تمت إزالة صورة البوت الشخصية الحالية.',keyboard([button('🖼️ إعدادات تعريف البوت','admin_bot_intro','primary')],adminBack),messageId);
+    }catch(e){await sendText(env,uid,'❌ تعذر إزالة الصورة من تيليجرام. لم نغيّر أي بيانات أخرى.');}
+  }
+  else if(data==='admin_support_contact'){
+    const [enabled,username,label]=await Promise.all([
+      getSetting(db,'support_direct_enabled','false'),
+      getSetting(db,'support_direct_username',''),
+      getSetting(db,'support_direct_label','👤 تواصل مباشر مع المسؤول')]);
+    await sendOrEditText(env,uid,`🎧 إدارة التواصل مع المسؤول\n\nالحالة: ${enabled==='true'?'ظاهر':'مخفي'}\nالمعرف: ${username||'لم يُحدد'}\nعنوان الزر: ${label}\n\nيظهر زر الرابط للعملاء فقط إذا كان مفعلاً ومعرف المسؤول صحيحاً.`,keyboard(
+      [button('👤 تعديل معرف المسؤول','admin_setting_edit:support_direct_username','primary')],
+      [button('✏️ تعديل عنوان الزر','admin_setting_edit:support_direct_label','primary')],
+      [button(enabled==='true'?'🙈 إخفاء':'✅ إظهار','admin_toggle_support_direct',enabled==='true'?'danger':'success')],
+      [button('🛡️ لوحة المدير','admin','primary')]),messageId);
+  }
+  else if(data==='admin_counter'){
+    const [real,offset]=await Promise.all([db.prepare('SELECT COUNT(*) n FROM users').first(),getSetting(db,'users_display_adjustment','0')]);
+    const count=Number(real?.n||0),adjustment=Number(offset||0);
+    await sendOrEditText(env,uid,`👥 إعدادات عداد المستخدمين\n\n📊 العدد الحقيقي في D1: ${count.toLocaleString('en-US')}\n🎨 العدد الظاهر بالترحيب: ${Math.max(0,count+adjustment).toLocaleString('en-US')}\n\nعند تسجيل مستخدم جديد، سيزيد العدد المعروض واحداً تلقائياً لأن التسجيل الفعلي هو أساس الحساب. هذا الرقم المعروض مخصص ولا يغيّر الإحصائيات الحقيقية.`,keyboard(
+      [button('✏️ تغيير العدد المعروض','admin_counter_edit','primary')],
+      [button('🔄 استعادة العدد الحقيقي','admin_counter_reset','success')],
+      [button('🖼️ إعدادات تعريف البوت','admin_bot_intro','primary')],adminBack),messageId);
+  }
+  else if(data==='admin_counter_edit'){
+    await setSession(db,uid,'owner_users_display_count');
+    await sendText(env,uid,'👥 أرسل العدد الذي تريد عرضه في رسالة الترحيب (رقم صحيح من 0 إلى 1,000,000,000).\n\nسيزداد تلقائياً عند تسجيل مستخدم جديد. للإلغاء /cancel.');
+  }
+  else if(data==='admin_counter_reset'){
+    await updateSetting(db,'users_display_adjustment','0',uid);
+    await audit(db,uid,'reset_display_count','setting',0);
+    await sendOrEditText(env,uid,'✅ استُعيد العدد الحقيقي المسجل في D1 دون حذف مستخدمين.',keyboard([button('👥 إعدادات العداد','admin_counter','primary')],adminBack),messageId);
+  }
+  else if(data==='admin_visuals')await sendOrEditText(env,uid,`🎨 تخصيص واجهة المتجر
 
 يمكن تعديل رسالة الترحيب والرموز المتحركة للصفحات دون تغيير الأرصدة أو الهويات الحقيقية.
 
@@ -175,6 +228,8 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
 أرسل الإيموجي المتحرك ضمن نص الترحيب نفسه لحفظه مع مكانه.
 
 أرسل رقم custom_emoji_id أو رسالة تحتوي على إيموجي متحرك عند اختيار حقل الرمز. يلزم دعم Telegram لتظهر الحركة.`,keyboard(
+    [button('🖼️ تعريف البوت قبل ابدأ','admin_bot_intro','primary')],
+    [button('👥 عداد المستخدمين','admin_counter','primary')],
     [button('👋 تعديل رسالة الترحيب','admin_setting:home_template','primary')],
     [button('↩️ إعادة رسالة الترحيب الأصلية','admin_visual_reset','danger')],
     [button('👁️ معاينة الرئيسية بالبيانات الحقيقية','admin_visual_preview','success')],
@@ -185,7 +240,8 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data==='admin_visual_preview')await customerHomePreview(db,env,uid,messageId);
   else if(data==='admin_visual_reset') {
     await setSession(db,uid,'owner_home_reset');
-    await sendOrEditText(env,uid,'↩️ استعادة رسالة الترحيب الافتراضية\n\nسيُستبدل نص الترحيب المعدّل بقالب My Store الأصلي، دون تغيير رصيد أي مستخدم أو بياناته أو إعدادات الرموز المتحركة المستقلة.\n\nهل تؤكد الاستعادة؟',keyboard(
+    await sendOrEditText(env,uid,
+    '↩️ استعادة رسالة الترحيب الافتراضية\n\nسيُستبدل نص الترحيب المعدّل بقالب My Store الأصلي، دون تغيير رصيد أي مستخدم أو بياناته أو إعدادات الرموز المتحركة المستقلة.\n\nهل تؤكد الاستعادة؟',keyboard(
       [button('✅ نعم، استعادة الترحيب','admin_visual_reset_confirm','success')],
       [button('❌ إلغاء','admin_visuals','danger')]),messageId);
   }
@@ -215,6 +271,12 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   }
   else if(data==='admin_stats')await stats(db,env,uid,messageId);
   else if(data.startsWith('admin_settings'))await settings(db,env,uid,Math.min(10,positiveInt(data.split(':')[1])??0),messageId);
+  else if(data==='admin_toggle_support_direct'){
+    const current=await getSetting(db,'support_direct_enabled','false');
+    await updateSetting(db,'support_direct_enabled',current==='true'?'false':'true',uid);
+    await audit(db,uid,'toggle_support_direct','setting',0);
+    await handleAdminCallback(db,env,uid,'admin_support_contact',messageId);
+  }
   else if(data==='admin_toggle_store'){
     const current=await getSetting(db,'store_enabled','true');
     await updateSetting(db,'store_enabled',current==='false'?'true':'false',uid);
@@ -238,6 +300,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_setting_edit:')){
     const key=data.substring('admin_setting_edit:'.length);
     if(!SETTING_FIELDS[key]||SETTING_FIELDS[key].toggle)return true;
+    if(SETTING_FIELDS[key]?.internal)return true;
     await setSession(db,uid,'owner_setting',{key});
     await sendText(env,uid,`✏️ تعديل ${SETTING_FIELDS[key].label}\n\nأرسل النص الجديد (حد أقصى ${SETTING_FIELDS[key].max} حرف).\nلمسح الحقل اكتب /empty. وللإلغاء اكتب /cancel.`);
   }
@@ -304,6 +367,26 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
 export async function handleAdminText(db,env,uid,session,message){
   if(!isAdmin(env,uid))return false;
   const text=String(message.text??'').trim();
+  if(session.action==='owner_bot_profile_picture'){
+    if(!message.photo?.length){await sendText(env,uid,'📷 أرسل صورة باستخدام خيار الصور في تيليجرام (JPEG). للإلغاء /cancel.');return true;}
+    try {
+      await updateBotProfilePicture(env,message.photo.at(-1).file_id);
+      await audit(db,uid,'set_bot_profile_photo','bot',0);
+      await clearSession(db,uid);
+      await sendText(env,uid,'✅ تم تحديث صورة البوت الشخصية بنجاح. صورة وصف البداية الكبيرة تُضبط بشكل منفصل من BotFather.',keyboard([button('🖼️ إعدادات تعريف البوت','admin_bot_intro','primary')],adminBack));
+    }catch(e){await sendText(env,uid,'❌ تعذر حفظ الصورة لدى تيليجرام. أرسل صورة JPEG أخرى أو /cancel.');}
+    return true;
+  }
+  if(session.action==='owner_users_display_count'){
+    if(!/^\d{1,10}$/.test(text)||Number(text)>1000000000){await sendText(env,uid,'❌ أرسل رقماً صحيحاً من 0 إلى 1,000,000,000.');return true;}
+    const users=await db.prepare('SELECT COUNT(*) n FROM users').first();
+    const offset=Number(text)-Number(users?.n||0);
+    await updateSetting(db,'users_display_adjustment',String(offset),uid);
+    await audit(db,uid,'adjust_display_count','setting',0);
+    await clearSession(db,uid);
+    await sendText(env,uid,`✅ العدد الظاهر الآن: ${Number(text).toLocaleString('en-US')}\nسيزيد واحداً عند تسجيل مستخدم جديد؛ العدد الحقيقي لم يتغيّر.`,keyboard([button('👥 إعدادات العداد','admin_counter','primary')],adminBack));
+    return true;
+  }
   if(session.action==='owner_setting'){
     const {key}=session.payload||{};
     const receivedCustom=(message.entities||message.caption_entities||[]).find(e=>e.type==='custom_emoji'&&e.custom_emoji_id)?.custom_emoji_id;
@@ -311,6 +394,15 @@ export async function handleAdminText(db,env,uid,session,message){
       : SETTING_FIELDS[key]?.customEmoji && receivedCustom ? String(receivedCustom) : text;
     const valid=validateSetting(key,raw==='/empty'?'':raw);
     if(!valid.ok){await sendText(env,uid,'❌ '+valid.reason);return true;}
+    if(SETTING_FIELDS[key]?.botProfile){
+      const method=SETTING_FIELDS[key].botProfile;
+      const payload= method==='setMyName'?{name:valid.value}:method==='setMyDescription'?{description:valid.value}:{short_description:valid.value};
+      try{await telegram(env,method,payload);}catch(e){
+        await sendText(env,uid,'❌ تعذّر تحديث معلومات البوت في Telegram؛ لم تُحفظ القيمة الجديدة. تحقق من حدود النص ثم أعد المحاولة.');
+        return true;
+      }
+    }
+    if(SETTING_FIELDS[key]?.internal){await sendText(env,uid,'❌ لا يمكن تغيير هذا الحقل مباشرة. استخدم صفحة عداد المستخدمين.');return true;}
     await updateSetting(db,key,valid.value,uid);
     await audit(db,uid,'edit_'+key,'setting',0);
     await clearSession(db,uid);

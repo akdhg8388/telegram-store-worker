@@ -1,6 +1,13 @@
 // The only values that an administrator may edit from Telegram. Secrets and identity are immutable here.
 export const SETTING_FIELDS=Object.freeze({
   store_name: {label:'🏪 اسم المتجر',max:80,required:true},
+  bot_public_name: {label:'🏷️ اسم البوت العام قبل البدء',max:64,botProfile:'setMyName'},
+  bot_public_description: {label:'📝 وصف البوت قبل زر ابدأ',max:512,botProfile:'setMyDescription'},
+  bot_public_short_description: {label:'📃 وصف البوت المختصر',max:120,botProfile:'setMyShortDescription'},
+  users_display_adjustment: {label:'👥 فرق عداد المستخدمين المعروض',max:12,internal:true},
+  support_direct_username: {label:'🔗 حساب المسؤول للتواصل المباشر',max:33,username:true},
+  support_direct_label: {label:'👤 عنوان زر المسؤول',max:60},
+  support_direct_enabled: {label:'👁️ إظهار زر تواصل المسؤول',max:5,toggle:true},
   home_template: {label:'👋 قالب رسالة الرئيسية (حقول حقيقية)',max:3200},
   welcome_text: {label:'👋 نص الترحيب السابق (للتوافق)',max:1500},
   home_custom_emoji_id: {label:'✨ الرمز المتحرك للرئيسية',max:30,customEmoji:true},
@@ -33,6 +40,8 @@ export function validateSetting(key,input){
   const field=SETTING_FIELDS[key];
   if(!field)return {ok:false,reason:'الإعداد غير مدعوم.'};
   const value=String(input??'').trim();
+  if(field.internal && (!/^-?\d+$/.test(value) || Math.abs(Number(value))>1000000000))return {ok:false,reason:'فرق العداد غير صالح.'};
+  if(field.username && value && !/^@?[A-Za-z][A-Za-z0-9_]{4,31}$/.test(value))return {ok:false,reason:'اكتب اسم مستخدم تيليجرام صحيحاً مثل @MyAccount (بدون رابط).'};
   if(field.customEmoji && value && !/^\d{10,30}$/.test(value))return {ok:false,reason:'أرسل custom_emoji_id الصحيح أو أرسل رسالة تتضمن الرمز المتحرك، أو /empty للمسح.'};
   if(field.rate && (!/^\d+$/.test(value) || Number(value)<100 || Number(value)>10000))return {ok:false,reason:'أدخل سعراً صحيحاً بين 100 و10,000 دينار لكل دولار واحد.'};
   if(field.toggle && !['true','false'].includes(value))return {ok:false,reason:'اختر تفعيل أو تعطيل من لوحة الإدارة.'};

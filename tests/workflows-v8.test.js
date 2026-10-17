@@ -76,7 +76,7 @@ test('reject never adds wallet money and removes old action keyboard',async()=>{
 
 test('support message and video attachments are persisted, routed and opened only by owner',async()=>{
   const {conn,db}=fixture();try{await withTelegram(async calls=>{
-    await send(db,[msg(101,{text:'/support'}),msg(101,{photo:[{file_id:'img',file_unique_id:'f1'}],caption:'الإيصال'}),msg(101,{text:'/support'}),msg(101,{video:{file_id:'clip'},caption:'الفيديو'})]);
+    await send(db,[msg(101,{text:'/support'}),cb(101,'support_compose'),msg(101,{photo:[{file_id:'img',file_unique_id:'f1'}],caption:'الإيصال'}),msg(101,{text:'/support'}),cb(101,'support_compose'),msg(101,{video:{file_id:'clip'},caption:'الفيديو'})]);
     assert.equal(conn.prepare('SELECT COUNT(*) n FROM support_messages').get().n,2);
     assert.equal(conn.prepare("SELECT COUNT(*) n FROM support_messages WHERE kind='video'").get().n,1);
     assert.equal(conn.prepare("SELECT COUNT(*) n FROM support_messages WHERE is_unread=1").get().n,2);
@@ -94,7 +94,7 @@ test('support message and video attachments are persisted, routed and opened onl
 
 test('support admin replies are delivered, timestamped, and deletion clearly reports Telegram refusal',async()=>{
   const {conn,db}=fixture();try{await withTelegram(async calls=>{
-    await send(db,[msg(101,{text:'/support'}),msg(101,{text:'هل الخدمة متوفرة؟'})]);
+    await send(db,[msg(101,{text:'/support'}),cb(101,'support_compose'),msg(101,{text:'هل الخدمة متوفرة؟'})]);
     await flushOutbox(db,env);
     await send(db,[cb(991,'support_reply:101'),msg(991,{text:'نعم، متوفرة'})]);
     assert.equal(conn.prepare('SELECT COUNT(*) n FROM support_messages').get().n,2);

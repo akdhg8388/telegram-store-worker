@@ -24,10 +24,13 @@ export async function home(db,env,uid,messageId=null) {
     db.prepare('SELECT COUNT(*) AS n FROM users').first(),
     usdRate(db)
   ]);
+  const storedAdjustment=await getSetting(db,'users_display_adjustment','0');
+  const adjustment=/^-?\d+$/.test(storedAdjustment) ? Number(storedAdjustment) : 0;
+  const shownUsers=Math.max(0,Number(count?.n||0)+adjustment);
   const balance=Number(user?.wallet_balance_iqd||0);
   const values={
     store:short(name,80),name:short(user?.first_name||'مستخدم',120),
-    id:String(uid),users:Number(count?.n||0).toLocaleString('en-US'),
+    id:String(uid),users:shownUsers.toLocaleString('en-US'),
     balance:user?.currency_preference==='USD' ? (rate?'$'+decimalMoney(balance/rate):'$—') : 'IQD '+Number(balance).toLocaleString('en-US'),
     balance_iqd:decimalMoney(balance),
     balance_usd:rate?decimalMoney(balance/rate):'غير محدد',
@@ -191,4 +194,18 @@ export async function topupStatusView(db,env,uid,id,messageId=null){
   return sendOrEditText(env,uid,topupStatusMessage(record),keyboard(
     [button('🔄 تحديث الحالة',`topup_status:${id}`,'primary')],
     [button('📦 طلباتي','orders','primary')],backRow()),messageId);
+}
+
+// The owner contact is an ordinary Telegram URL button. Its visibility and
+// destination are editable, but never grants any administrative privileges.
+export async function supportMenu(db,env,uid,messageId=null){
+  const enabled=await getSetting(db,'support_direct_enabled','false');
+  const username=await getSetting(db,'support_direct_username','');
+  const label=await getSetting(db,'support_direct_label','👤 تواصل مباشر مع المسؤول');
+  const rows=[[button('💬 تواصل مع الدعم الفني','support_compose','primary')]];
+  if(enabled==='true' && /^@?[A-Za-z][A-Za-z0-9_]{4,31}$/.test(username))
+    rows.push([urlButton(short(label||'👤 تواصل مباشر مع المسؤول',60),
+      'https://t.me/'+username.replace(/^@/,''),'success')]);
+  rows.push(backRow());
+  return sendOrEditText(env,uid,'🎧 مركز الدعم الفني\n\nاختر طريقة التواصل المناسبة:',keyboard(...rows),messageId);
 }

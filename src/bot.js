@@ -146,11 +146,7 @@ async function handleMessage(db,env,ctx,message){
   if(text==='/wallet'){await clearSession(db,uid);return ui.wallet(db,env,uid)}
   if(text==='/topup'){await clearSession(db,uid);return await isTopupEnabled(db,env)?ui.topupPresets(db,env,uid):ui.wallet(db,env,uid)}
   if(text==='/currency'){await clearSession(db,uid);return ui.currencyMenu(db,env,uid)}
-  if(text==='/support'){
-    await setSession(db,uid,'support');
-    const instructions=await getSetting(db,'support_instructions','');
-    return sendText(env,uid,`🎧 اكتب رسالتك الآن. للإلغاء استخدم /cancel.${instructions?'\n\n'+short(instructions,1000):''}`);
-  }
+  if(text==='/support'){await clearSession(db,uid);return ui.supportMenu(db,env,uid);}
   if(text==='/paysupport')return sendText(env,uid,'💳 للمساعدة بشأن مدفوعات Telegram Stars أرسل /support واكتب رقم الطلب ومشكلتك.');
   if(text==='/terms')return sendText(env,uid,await getSetting(db,'terms_text','📜 شروط مبدئية: لا يتم التسليم إلا بعد الدفع وموافقة المدير. تختلف الشروط حسب المنتج. للدعم: /support. حدّث الشروط قبل التشغيل العام.'));
   if(text==='/privacy')return sendText(env,uid,await getSetting(db,'privacy_text','🔐 سيتم تحديث سياسة الخصوصية قبل استقبال العملاء.'));
@@ -204,6 +200,7 @@ async function adminMenu(db,env,uid,messageId=null){
     [button('🛍️ طلبات الشراء','admin_orders','primary'),button('💳 طلبات الشحن','admin_topups','success')],
     [button('⚙️ إعداد شحن المحفظة','admin_topup_setup','primary')],
     [button('📨 رسائل الدعم الفني','support_inbox','primary'),button('🚫 إدارة المستخدمين','admin_users','primary')],
+    [button('👤 التواصل المباشر مع المسؤول','admin_support_contact','primary')],
     [button('🎨 تخصيص واجهة المتجر','admin_visuals','primary')],
     [button('📦 بانتظار التسليم','admin_delivery')],
     [button('📦 المنتجات والأسعار','admin_products:0'),button('📂 الأقسام','admin_manage_categories')],
@@ -354,7 +351,8 @@ async function handleCallback(db,env,ctx,q){
   if(data==='favorites')return ui.favorites(db,env,uid,q.message?.message_id);
   if(data==='products:0' || /^products:\d+$/.test(data))return ui.products(db,env,uid,Math.min(100,Number(data.split(':')[1])),null,null,false,q.message?.message_id);
   if(data==='search'){await setSession(db,uid,'search');return sendText(env,uid,'🔎 أدخل اسم المنتج الذي تبحث عنه. للإلغاء /cancel.');}
-  if(data==='support'){
+  if(data==='support'){await clearSession(db,uid);return ui.supportMenu(db,env,uid,q.message?.message_id);}
+  if(data==='support_compose'){
     await setSession(db,uid,'support');
     const instructions=await getSetting(db,'support_instructions','');
     return sendText(env,uid,`🎧 أرسل رسالتك الآن. للإلغاء /cancel.${instructions?'\n\n'+short(instructions,1000):''}`);
