@@ -152,7 +152,7 @@ export async function wallet(db,env,uid,messageId=null){
     '',
     labels[0]+' '+amount,
     labels[1]+' '+w.currency,
-    w.rate?labels[2]+' 1 USD = '+displayIqd(w.rate):choice(env,'⚠️ لم تحدد الإدارة سعر الصرف بعد.','⚠️ The exchange rate has not yet been configured.'),
+    labels[2]+' '+(w.rate?'1 USD = '+displayIqd(w.rate):choice(env,'⚠️ لم تحدد الإدارة سعر الصرف بعد.','⚠️ The exchange rate has not yet been configured.')),
     '',
     enabled?choice(env,'✅ يمكنك إرسال طلب شحن لمراجعته من الإدارة.','✅ You can submit a top-up request for review by the support team.'):
       choice(env,'⏳ شحن المحفظة لم يُفعّل من الإدارة بعد.','⏳ Wallet top-ups are currently unavailable.'),
