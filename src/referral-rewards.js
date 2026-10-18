@@ -3,6 +3,8 @@ import {sendText,sendOrEditText} from './telegram.js';
 import {setSession,clearSession,audit,getUser} from './database.js';
 import {choice,languageOf} from './i18n.js';
 import {usdRate,formatUSD} from './wallet.js';
+import {getSetting,updateSetting} from './settings.js';
+import {homeSettingKey} from './home-buttons.js';
 export const policy=db=>db.prepare('SELECT * FROM referral_policy WHERE id=1').first();
 export async function referralPage(db,env,uid,messageId=null){
  const [p,n,total,u,rate]=await Promise.all([
@@ -31,10 +33,10 @@ const fields={basis_points:['📊 النسبة المئوية (اكتب 5 للن
 const ownerBack=[button('🛡️ لوحة المدير','admin')];
 export async function referralAdmin(db,env,uid,messageId=null){
  if(!isAdmin(env,uid))return false;
- const [p,total]=(await Promise.all([policy(db),db.prepare('SELECT COUNT(*) n,COALESCE(SUM(reward_iqd),0) sum FROM referral_rewards').first()]));
- return sendOrEditText(env,uid,'🎁 إدارة مكافآت الإحالات\n\nالحالة: '+(p.enabled?'🟢 مفعلة':'🔴 متوقفة')+'\nزر الإحالات: '+(p.visible?'ظاهر':'مخفي')+'\nالنسبة: '+p.basis_points/100+'%\nالمشتريات المؤهلة: '+(p.max_purchases||'مدى الحياة')+'\nالحد الأدنى: '+formatIQD(p.min_purchase_iqd)+'\nالسقف: '+(p.max_reward_iqd?formatIQD(p.max_reward_iqd):'بلا حد')+'\n\nالمكافآت: '+total.n+' • '+formatIQD(total.sum),keyboard(
+ const [p,total,visible]=await Promise.all([policy(db),db.prepare('SELECT COUNT(*) n,COALESCE(SUM(reward_iqd),0) sum FROM referral_rewards').first(),getSetting(db,homeSettingKey('referrals','visible'),'true')]);
+ return sendOrEditText(env,uid,'🎁 إدارة مكافآت الإحالات\n\nالحالة: '+(p.enabled?'🟢 مفعلة':'🔴 متوقفة')+'\nزر الإحالات: '+(visible==='false'?'مخفي':'ظاهر')+'\nالنسبة: '+p.basis_points/100+'%\nالمشتريات المؤهلة: '+(p.max_purchases||'مدى الحياة')+'\nالحد الأدنى: '+formatIQD(p.min_purchase_iqd)+'\nالسقف: '+(p.max_reward_iqd?formatIQD(p.max_reward_iqd):'بلا حد')+'\n\nالمكافآت: '+total.n+' • '+formatIQD(total.sum),keyboard(
  [button(p.enabled?'⏸️ إيقاف المكافآت':'✅ تشغيل المكافآت','refadmin_toggle',p.enabled?'danger':'success')],
- [button(p.visible?'🙈 إخفاء الإحالات':'👁️ إظهار الإحالات','refadmin_visible','primary')],
+ [button(visible==='false'?'👁️ إظهار الإحالات':'🙈 إخفاء الإحالات','refadmin_visible','primary')],
  ...Object.entries(fields).map(([k,v])=>[button('✏️ '+v[0],'refadmin_edit:'+k,'primary')]),
  [button('📜 سجل مكافآت الإحالات','refadmin_history')],ownerBack),messageId);
 }
@@ -50,7 +52,11 @@ export async function referralAdminCallback(db,env,uid,data,messageId=null){
  else if(data==='refadmin_history')await adminHistory(db,env,uid,messageId);
  else if(data==='refadmin_toggle'||data==='refadmin_visible'){
   const field=data==='refadmin_toggle'?'enabled':'visible';
-  await db.prepare('UPDATE referral_policy SET '+field+'=1-'+field+' WHERE id=1').run();
+  if(field==='visible'){
+    const key=homeSettingKey('referrals','visible');
+    const current=await getSetting(db,key,'true');
+    await updateSetting(db,key,current==='false'?'true':'false',uid);
+  }else await db.prepare('UPDATE referral_policy SET enabled=1-enabled WHERE id=1').run();
   await audit(db,uid,'referral_'+field,'policy',1);
   await referralAdmin(db,env,uid,messageId);
  }else{
