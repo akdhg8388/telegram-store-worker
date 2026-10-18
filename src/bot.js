@@ -4,6 +4,7 @@ import {button,keyboard,backRow,adminIds,isAdmin,positiveInt,short,formatStars,f
 import {telegram,sendText,sendOrEditText,answerCallback,queueNotification,flushOutbox} from './telegram.js';
 import {ensureUser,getUser,setSession,getSession,clearSession,getProduct,audit} from './database.js';
 import * as ui from './ui.js';
+import {referralPage,referralHistory,referralAdminCallback,referralAdminText} from './referral-rewards.js';
 import {handleAdminCallback,handleAdminText} from './admin-controls.js';
 import {getSetting,storeAcceptsOrders,maintenanceActive} from './settings.js';
 import {USD_PRESETS,formatQuote,usdRate,isTopupEnabled,receiverFor,quoteMinor,quoteFromUSD,parseCustomMinor,topupStatusMessage,baghdadDate} from './wallet.js';
@@ -185,6 +186,7 @@ async function handleMessage(db,env,ctx,message){
   }
   const session=await getSession(db,uid);
   if(session){
+    if(session.action.startsWith('owner_') && await referralAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleChannelAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleUserText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleAdminText(db,env,uid,session,message))return;
@@ -222,6 +224,7 @@ async function adminMenu(db,env,uid,messageId=null){
     [button('🎨 تخصيص واجهة المتجر','admin_visuals','primary')],
     [button('🛠️ وضع الصيانة','admin_maintenance','danger')],
     [button('📢 الاشتراك الإجباري','required_manage','primary')],
+    [button('🎁 مكافآت الإحالات','refadmin','primary')],
     [button('✅ مشتريات المستخدمين الناجحة','admin_wallet_sales','success')],
     [button('📦 بانتظار التسليم','admin_delivery')],
     [button('📦 المنتجات والأسعار','admin_products:0'),button('📂 الأقسام','admin_manage_categories')],
@@ -416,6 +419,7 @@ async function handleCallback(db,env,ctx,q){
     const gate=await gateState(db,env,uid);
     if(!gate.allowed)return showGate(db,env,uid,gate,q.message?.message_id);
   }
+  if(await referralAdminCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleChannelAdmin(db,env,uid,data,q.message?.message_id))return;
   if(await handleCustomerSupportCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleSupportCallback(db,env,uid,data,q.message?.message_id))return;
@@ -465,11 +469,8 @@ async function handleCallback(db,env,ctx,q){
       .catch(e=>console.error('Failed to update user command language',String(e))));
     return ui.home(db,env,uid,q.message?.message_id);
   }
-  if(data==='referrals'){
-    const count=await db.prepare('SELECT count(*) n FROM referrals WHERE referrer_tg_id=?').bind(uid).first();
-    const link=env.BOT_USERNAME?`https://t.me/${env.BOT_USERNAME.replace('@','')}?start=ref_${uid}`:'سيظهر الرابط عند ضبط BOT_USERNAME';
-    return sendText(env,uid,`👥 برنامج الإحالات\n\nعدد الأصدقاء المدعوين: ${count?.n||0}\nرابطك: ${link}\n\nمكافآت الإحالة غير مفعّلة حالياً؛ لا توجد أرباح تلقائية من عمليات الشراء.`,keyboard(backRow()));
-  }
+  if(data==='referrals')return referralPage(db,env,uid,q.message?.message_id);
+  if(data==='referral_history')return referralHistory(db,env,uid,q.message?.message_id);
   if(data.startsWith('category:')){
     const m=data.match(/^category:(\d+):(\d+)$/);
     if(m)return ui.products(db,env,uid,Math.min(Number(m[2]),100),Number(m[1]),null,false,q.message?.message_id);
