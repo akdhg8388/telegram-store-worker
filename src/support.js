@@ -3,6 +3,9 @@ import {sendText,sendOrEditText,telegram,queueNotification,flushOutbox} from './
 import {setSession,clearSession,getUser,audit} from './database.js';
 import {baghdadDate} from './wallet.js';
 import {decoratedMessage} from './presentation.js';
+import {getSetting} from './settings.js';
+import {homeSettingKey} from './home-buttons.js';
+import {choice,languageOf} from './i18n.js';
 
 const back=()=>[button('↩️ رجوع إلى الرسائل','support_inbox','danger')];
 const adminBack=()=>[button('🛡️ لوحة الإدارة','admin','primary')];
@@ -153,11 +156,17 @@ export async function handleSupportReply(db,env,uid,session,message){
 export async function customerInbox(db,env,uid,messageId=null){
   const count=await db.prepare('SELECT COUNT(*) n FROM support_messages WHERE user_tg_id=?').bind(uid).first();
   const latest=await db.prepare('SELECT kind,direction,created_at FROM support_messages WHERE user_tg_id=? ORDER BY id DESC LIMIT 1').bind(uid).first();
-  const decorated=await decoratedMessage(db,'support',`📨 رسائلي — الدعم الفني\n\n📩 الرسائل المحفوظة: ${count?.n||0}${latest?'\n🕓 آخر تواصل: '+baghdadDate(latest.created_at):''}\n\nيمكنك مراجعة رسائلك وردود الإدارة والصور والفيديوهات وتاريخ كل رسالة.`);
+  const en=languageOf(env)==='en';
+  const defaultDescription=choice(env,'يمكنك مراجعة رسائلك وردود الإدارة والصور والفيديوهات وتاريخ كل رسالة.','Review your messages, support replies, photos, videos and message dates.');
+  const description=await getSetting(db,homeSettingKey('messages',en?'description_en':'description_ar'),defaultDescription);
+  const heading=choice(env,'📨 رسائلي — الدعم الفني','📨 My Messages — Support');
+  const countLabel=choice(env,'📩 الرسائل المحفوظة: ','📩 Saved messages: ');
+  const latestLabel=choice(env,'\n🕓 آخر تواصل: ','\n🕓 Last contact: ');
+  const decorated=await decoratedMessage(db,'support',`${heading}\n\n${countLabel}${count?.n||0}${latest?latestLabel+baghdadDate(latest.created_at):''}\n\n${description||defaultDescription}`);
   return sendOrEditText(env,uid,decorated.text,keyboard(
-    [button('💬 فتح سجل المحادثة','my_support_thread:0','primary')],
-    [button('✉️ رسالة جديدة للدعم','my_support_new','success')],
-    [button('📦 رجوع إلى طلباتي','orders','danger')]),messageId,decorated.options);
+    [button(choice(env,'💬 فتح سجل المحادثة','💬 View Conversation'),'my_support_thread:0','primary')],
+    [button(choice(env,'✉️ رسالة جديدة للدعم','✉️ New Support Message'),'my_support_new','success')],
+    [button(choice(env,'🏠 الرجوع للرئيسية','🏠 Back to Home'),'home','danger')]),messageId,{...decorated.options,preserveText:en});
 }
 export async function customerThread(db,env,uid,page=0,messageId=null){
   const offset=Math.max(0,Math.min(page,200))*8;
@@ -179,7 +188,7 @@ export async function handleCustomerSupportCallback(db,env,uid,data,messageId=nu
   if(data==='my_support_inbox'){await customerInbox(db,env,uid,messageId);return true;}
   if(data==='my_support_new'){
     await setSession(db,uid,'support');
-    await sendText(env,uid,'✉️ أرسل نصاً أو صورة أو فيديو الآن. سيُحفظ تواصلك في «طلباتي ← رسائلي».',keyboard([button('📨 رسائلي','my_support_inbox','primary')],[button('🏠 الرئيسية','home','danger')]));
+    await sendText(env,uid,'✉️ أرسل نصاً أو صورة أو فيديو الآن. سيُحفظ تواصلك في «رسائلي» من القائمة الرئيسية.',keyboard([button('📨 رسائلي','my_support_inbox','primary')],[button('🏠 الرئيسية','home','danger')]));
     return true;
   }
   if(data.startsWith('my_support_thread:')){

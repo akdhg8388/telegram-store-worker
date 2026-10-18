@@ -4,7 +4,7 @@ import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from '
 import {sendOrEditText} from './telegram.js';
 import {getSetting,storeAcceptsOrders} from './settings.js';
 import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,renderHomeTemplate,decimalMoney,decoratedMessage,decoratedHome,decorateProductText} from './presentation.js';
-import {loadVisualSettings,homeActionButton,homeUrlButton,withButtonIcon,emojiId} from './home-buttons.js';
+import {loadVisualSettings,homeActionButton,homeUrlButton,isHomeButtonVisible,withButtonIcon,emojiId} from './home-buttons.js';
 import {languageOf,choice,translateUi} from './i18n.js';
 import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage,validRate} from './wallet.js';
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
@@ -24,15 +24,17 @@ export async function home(db,env,uid,messageId=null) {
   const display=amount=>user?.currency_preference==='USD'&&rate
     ?formatUSD(Math.round(Number(amount)*100/rate)):formatIQD(amount);
   const rows=[];
+  const homeButton=(id,style='primary')=>isHomeButtonVisible(visual,id)?homeActionButton(visual,id,lang,style):null;
   for(const p of featured)rows.push([withButtonIcon(button(`🌟 ${short(lang==='en'&&p.title_en||p.title,25)} — ${display(p.price_iqd)}`,`product:${p.id}`,'success'),p.custom_emoji_id||visual.product_custom_emoji_id)]);
-  rows.push([homeActionButton(visual,'shop',lang,'success'),homeActionButton(visual,'featured',lang,'success')]);
-  rows.push([homeActionButton(visual,'wallet',lang,'success'),homeActionButton(visual,'profile',lang,'success')]);
-  rows.push([homeActionButton(visual,'currency',lang,'primary')]);
-  rows.push([homeActionButton(visual,'orders',lang),homeActionButton(visual,'transactions',lang)]);
-  rows.push([homeActionButton(visual,'referrals',lang),homeActionButton(visual,'language',lang)]);
-  rows.push([homeActionButton(visual,'support',lang),homeActionButton(visual,'news',lang)]);
-  if(isAdmin(env,uid))rows.push([homeActionButton(visual,'admin',lang,'primary')]);
-  if(env.RESELLER_URL?.startsWith('https://'))rows.push([homeUrlButton(visual,'reseller',env.RESELLER_URL,lang)]);
+  rows.push([homeButton('shop','success'),homeButton('featured','success')]);
+  rows.push([homeButton('wallet','success'),homeButton('profile','success')]);
+  rows.push([homeButton('currency')]);
+  rows.push([homeButton('orders'),homeButton('transactions')]);
+  rows.push([homeButton('messages','primary')]); // Telegram accent/blue varies by theme.
+  rows.push([homeButton('referrals'),homeButton('language')]);
+  rows.push([homeButton('support'),homeButton('news')]);
+  if(isAdmin(env,uid))rows.push([homeButton('admin')]);
+  if(env.RESELLER_URL?.startsWith('https://')&&isHomeButtonVisible(visual,'reseller'))rows.push([homeUrlButton(visual,'reseller',env.RESELLER_URL,lang)]);
   const adjustment=/^-?\d+$/.test(visual.users_display_adjustment||'0') ? Number(visual.users_display_adjustment||0):0;
   const shownUsers=Math.max(0,Number(count?.n||0)+adjustment);
   const balance=Number(user?.wallet_balance_iqd||0);
@@ -45,7 +47,7 @@ export async function home(db,env,uid,messageId=null) {
   };
   const template=lang==='en'?(visual.home_template_en||DEFAULT_HOME_TEMPLATE_EN):(visual.home_template||DEFAULT_HOME_TEMPLATE);
   const decorated=await decoratedHome(db,renderHomeTemplate(template,values),visual.home_custom_emoji_id||'');
-  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,{...decorated.options,preserveText:lang==='en'});
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows.map(row=>row.filter(Boolean))),messageId,{...decorated.options,preserveText:lang==='en'});
 }
 export async function categories(db,env,uid,messageId=null) {
   const cats=await listCategories(db);
@@ -158,8 +160,7 @@ export async function orders(db,env,uid,messageId=null){
   const topups=(await db.prepare('SELECT id,method,amount_iqd,requested_currency,requested_amount_minor,status,created_at FROM topup_requests WHERE user_tg_id=? ORDER BY id DESC LIMIT 10').bind(uid).all()).results??[];
   const topupText=topups.length?topups.map(t=>`#${t.id} • ${formatQuote({currency:t.requested_currency,requestedMinor:t.requested_amount_minor,amountIqd:t.amount_iqd})} • ${topupStatus(t.status)}`).join('\n'):'لا توجد طلبات شحن.';
   rows.push(...topups.slice(0,8).map(t=>[button(`💳 متابعة شحن #${t.id}`,`topup_status:${t.id}`,'primary')]));
-  rows.push([button('📨 رسائلي — ردود الدعم','my_support_inbox','primary')]);
-  rows.push(backRow());
+   rows.push(backRow());
   const totalWallet=(await db.prepare('SELECT COUNT(*) AS n FROM wallet_purchases WHERE user_tg_id=?').bind(uid).first())?.n||0;
   const ordersText=`📦 طلباتي\n\n✅ مشتريات المحفظة المسلّمة: ${totalWallet}\nاضغط «مشترياتي وتسليماتي» لعرض المنتجات والصور وتعليمات الاستخدام.\n\n🛍️ الطلبات القديمة\n${txt}\n\n💳 طلبات شحن المحفظة\n${topupText}`;
   const decorated=await decoratedMessage(db,'orders',ordersText);

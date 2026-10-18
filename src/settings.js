@@ -36,6 +36,9 @@ export const SETTING_FIELDS=Object.freeze({
   usd_rate_iqd: {label:'💱 سعر الدولار بالدينار العراقي (لكل 1 USD)',max:5,required:true,rate:true},
   manual_topups_enabled: {label:'💳 تشغيل طلبات شحن المحفظة',max:5,toggle:true},
   store_enabled: {label:'🔌 استقبال طلبات جديدة',max:5,toggle:true},
+  maintenance_enabled: {label:'🛠️ وضع الصيانة',max:5,toggle:true},
+  maintenance_message_ar: {label:'🛠️ رسالة الصيانة بالعربي',max:800},
+  maintenance_message_en: {label:'🛠️ Maintenance message (English)',max:800},
   ...homeButtonSettings(),
 });
 
@@ -72,4 +75,5 @@ export async function updateSetting(db,key,value,adminId){
   return valid.value;
 }
 
-export async function storeAcceptsOrders(db){return (await getSetting(db,'store_enabled','true'))!=='false';}
+export async function storeAcceptsOrders(db){return (await getSetting(db,'store_enabled','true'))!=='false' && (await getSetting(db,'maintenance_enabled','false'))!=='true';}
+export async function maintenanceActive(db){return (await getSetting(db,'maintenance_enabled','false'))==='true';}

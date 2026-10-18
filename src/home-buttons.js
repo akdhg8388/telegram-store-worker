@@ -9,6 +9,7 @@ export const HOME_BUTTONS=Object.freeze([
   {id:'profile',action:'profile',ar:'👤 ملفي الشخصي',en:'👤 My Profile',legacy:'profile_custom_emoji_id'},
   {id:'currency',action:'currency',ar:'💱 تغيير العملة 🇮🇶/🇺🇸',en:'💱 Change Currency 🇮🇶/🇺🇸'},
   {id:'orders',action:'orders',ar:'📦 طلباتي',en:'📦 My Orders',legacy:'orders_custom_emoji_id'},
+  {id:'messages',action:'my_support_inbox',ar:'📨 رسائلي',en:'📨 My Messages'},
   {id:'transactions',action:'transactions',ar:'📜 سجل العمليات',en:'📜 Transaction History'},
   {id:'referrals',action:'referrals',ar:'👥 الإحالات',en:'👥 Referrals'},
   {id:'language',action:'language',ar:'🌐 اللغة',en:'🌐 Language'},
@@ -31,13 +32,17 @@ export function homeButtonSettings(){
     result[homeSettingKey(x.id,'label_ar')]={label:`✏️ اسم زر ${x.ar} بالعربي`,max:52};
     result[homeSettingKey(x.id,'label_en')]={label:`✏️ English label for ${x.en}`,max:52};
     result[homeSettingKey(x.id,'icon')]={label:`✨ رمز زر ${x.ar}`,max:30,customEmoji:true};
+    result[homeSettingKey(x.id,'visible')]={label:`👁️ إظهار زر ${x.ar}`,max:5,toggle:true};
     // Internal Unicode fallbacks preserve the glyph's exact position in edited names.
     result[homeSettingKey(x.id,'inline_ar')]={label:'Internal emoji fallback (Arabic)',max:16,internal:true,internalText:true};
     result[homeSettingKey(x.id,'inline_en')]={label:'Internal emoji fallback (English)',max:16,internal:true,internalText:true};
   }
+  result[homeSettingKey('messages','description_ar')]={label:'📝 وصف صفحة رسائلي بالعربي',max:800};
+  result[homeSettingKey('messages','description_en')]={label:'📝 My Messages page description (English)',max:800};
   for(const x of ICON_SLOTS)result[productIconKey(x.id)]={label:x.ar,max:30,customEmoji:true};
   return result;
 }
+export function isHomeButtonVisible(settings,id){return settings[homeSettingKey(id,'visible')]!=='false';}
 export function emojiId(value){return VALID_EMOJI.test(String(value||''))?String(value):null;}
 export async function loadVisualSettings(db){
   const rows=await db.prepare(`SELECT key,value FROM bot_settings WHERE key LIKE 'home_button_%' OR key LIKE '%_custom_emoji_id' OR key IN ('store_name','home_template','home_template_en','storefront_instructions','users_display_adjustment','purchase_instructions','usd_rate_iqd')`).all();
