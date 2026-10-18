@@ -47,7 +47,7 @@ test('atomic debit gives exact delivered content, picture and instructions and r
    assert.deepEqual(second,{id:1,repeated:true});
    assert.equal(balance(c),38000);
    await showReceipt(db,env,101,1);
-   assert.ok(calls.some(x=>x.body.text?.includes('download-code-ABC')&&x.body.text.includes('Instruction steps')));
+   assert.ok(calls.some(x=>(x.body.text||x.body.caption||'').includes('download-code-ABC')&&(x.body.text||x.body.caption||'').includes('Instruction steps')));
    assert.ok(calls.some(x=>x.method==='sendPhoto'&&x.body.photo==='PHOTO1'));
    // A different Telegram user must not access the receipt.
    const before=calls.length;await showReceipt(db,env,102,1);
