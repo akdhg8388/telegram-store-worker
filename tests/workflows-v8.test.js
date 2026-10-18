@@ -57,7 +57,7 @@ test('owner can approve lower actual receipt exactly once; requested and credite
     assert.ok(t.created_at&&t.decided_at);
     assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,100000);
     assert.equal(conn.prepare("SELECT COUNT(*) n FROM wallet_ledger WHERE source_key='topup:1'").get().n,1);
-    assert.ok(calls.some(c=>c.method==='editMessageReplyMarkup'&&c.params.message_id===654));
+    assert.ok(calls.some(c=>c.method==='deleteMessage'&&c.params.message_id===654));
     await flushOutbox(db,env);
     assert.ok(labels(calls).some(s=>s.includes('المبلغ المضاف فعلياً: 100,000')));
     assert.match(topupStatusMessage(t),/المضاف فعلياً: 100,000/);
