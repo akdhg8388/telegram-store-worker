@@ -90,3 +90,26 @@ test('V21 owner can set percentage and unlimited purchase count by Telegram cont
   assert.equal(c.prepare('SELECT max_purchases FROM referral_policy').get().max_purchases,0);
  });}finally{c.close();}
 });
+
+test('V21 optional one-time welcome gift and localized queued notice survive repeat purchases',()=>{
+ const {c}=fixture();try{
+  c.exec("INSERT INTO bot_settings(key,value) VALUES('referral_welcome_bonus_iqd','200'),('referral_notice_en','My referral reward')");
+  c.exec("UPDATE users SET language='en' WHERE tg_id=102");
+  c.exec("UPDATE referral_policy SET enabled=1");
+  buy(c,1);buy(c,2);
+  assert.equal(c.prepare("SELECT COUNT(*) n FROM wallet_ledger WHERE source_key='referral_welcome:101'").get().n,1);
+  assert.equal(c.prepare("SELECT delta_iqd FROM wallet_ledger WHERE source_key='referral_welcome:101'").get().delta_iqd,200);
+  const notice=c.prepare("SELECT payload FROM notification_outbox WHERE method='sendMessage' ORDER BY id LIMIT 1").get();
+  assert.match(JSON.parse(notice.payload).text,/My referral reward/);
+  assert.equal(c.prepare("SELECT COUNT(*) n FROM notification_outbox WHERE method='sendMessage'").get().n,2);
+ }finally{c.close();}
+});
+test('V21 changing settings does not retroactively issue referral rewards',()=>{
+ const {c}=fixture();try{
+  buy(c,1);
+  c.exec("UPDATE referral_policy SET enabled=1");
+  assert.equal(rewards(c).length,0);
+  buy(c,2);
+  assert.equal(rewards(c).length,1);
+ }finally{c.close();}
+});
