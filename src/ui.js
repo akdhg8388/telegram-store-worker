@@ -143,9 +143,27 @@ export async function wallet(db,env,uid,messageId=null){
   const rows=[[button('💳 شحن المحفظة','topup',enabled?'success':'primary')],
     [button('🗂️ طلبات الشحن','orders','primary'),button('📜 سجل المحفظة','transactions','primary')],
     [button('🌐 تغيير العملة','currency','primary')],backRow()];
-  const walletText=`💳 محفظتي\n\n💰 رصيدك: ${w.shown}\n🏷️ عملة العرض: ${w.currency}\n${w.rate?'💱 السعر المعتمد: 1 USD = '+formatIQD(w.rate):'⚠️ يحتاج عرض الدولار إلى تحديد سعر الصرف من المدير.'}\n\n${enabled?'✅ يمكنك إرسال طلب شحن لمراجعته من الإدارة.':'⏳ شحن المحفظة لم يُفعّل من الإدارة بعد.'}\n\n🔒 لا يُضاف أي رصيد حتى يؤكد المدير وصول التحويل.`;
+  const en=languageOf(env)==='en';
+  const labels=en?['💰 Your balance:','🏷️ Display currency:','💱 Approved rate:']:['💰 رصيدك:','🏷️ عملة العرض:','💱 السعر المعتمد:'];
+  const displayIqd=v=>en?formatIQD(v).replace(' د.ع',' IQD'):formatIQD(v);
+  const amount=en?String(w.shown).replace(' د.ع',' IQD').replace('الدولار غير مهيأ بعد','USD exchange rate unavailable'):w.shown;
+  const walletText=[
+    choice(env,'💳 محفظتي','💳 My Wallet'),
+    '',
+    labels[0]+' '+amount,
+    labels[1]+' '+w.currency,
+    w.rate?labels[2]+' 1 USD = '+displayIqd(w.rate):choice(env,'⚠️ لم تحدد الإدارة سعر الصرف بعد.','⚠️ The exchange rate has not yet been configured.'),
+    '',
+    enabled?choice(env,'✅ يمكنك إرسال طلب شحن لمراجعته من الإدارة.','✅ You can submit a top-up request for review by the support team.'):
+      choice(env,'⏳ شحن المحفظة غير متاح حالياً.','⏳ Wallet top-ups are currently unavailable.'),
+    '',
+    choice(env,'🔒 يُعتمد رصيد الشحن بعد مراجعة الإدارة والتحقق من استلام التحويل.','🔒 Top-ups are credited after the administration reviews and verifies the transfer.')
+  ].join('\n');
   const decorated=await decoratedMessage(db,'wallet',walletText);
-  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
+  const boldLabels=labels.map(label=>({type:'bold',offset:decorated.text.indexOf(label),length:label.length}))
+    .filter(e=>e.offset>=0);
+  const entities=[...(decorated.options?.entities||[]),...boldLabels];
+  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,{entities,preserveText:true});
 }
 export async function transactions(db,env,uid,messageId=null){
   const entries=await ledger(db,uid);

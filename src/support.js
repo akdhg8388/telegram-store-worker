@@ -165,7 +165,6 @@ export async function customerInbox(db,env,uid,messageId=null){
   const decorated=await decoratedMessage(db,'support',`${heading}\n\n${countLabel}${count?.n||0}${latest?latestLabel+baghdadDate(latest.created_at):''}\n\n${description||defaultDescription}`);
   return sendOrEditText(env,uid,decorated.text,keyboard(
     [button(choice(env,'💬 فتح سجل المحادثة','💬 View Conversation'),'my_support_thread:0','primary')],
-    [button(choice(env,'✉️ رسالة جديدة للدعم','✉️ New Support Message'),'my_support_new','success')],
     [button(choice(env,'🏠 الرجوع للرئيسية','🏠 Back to Home'),'home','danger')]),messageId,{...decorated.options,preserveText:en});
 }
 export async function customerThread(db,env,uid,page=0,messageId=null){
@@ -179,16 +178,23 @@ export async function customerThread(db,env,uid,page=0,messageId=null){
   if(page>0)nav.push(button('⬅️ أحدث',`my_support_thread:${page-1}`,'primary'));
   if(messages.length>8)nav.push(button('أقدم ➡️',`my_support_thread:${page+1}`,'primary'));
   if(nav.length)rows.push(nav);
-  rows.push([button('✉️ رد أو رسالة جديدة','my_support_new','success')]);
+  const hasConversation=await db.prepare('SELECT 1 AS found FROM support_messages WHERE user_tg_id=? LIMIT 1').bind(uid).first();
+  if(hasConversation)rows.push([button(choice(env,'↩️ الرد على المحادثة','↩️ Reply to Conversation'),'my_support_reply','success')]);
   rows.push([button('↩️ رجوع لرسائلي','my_support_inbox','danger')]);
   return sendOrEditText(env,uid,`📨 سجل رسائلي • صفحة ${page+1}\n\n${text||'لا توجد مراسلات بعد.'}`,keyboard(...rows),messageId);
 }
 export async function handleCustomerSupportCallback(db,env,uid,data,messageId=null){
-  if(!/^(?:my_support_inbox|my_support_new|my_support_thread:\d+|my_support_media:\d+)$/.test(data))return false;
+  if(!/^(?:my_support_inbox|my_support_reply|my_support_new|my_support_thread:\d+|my_support_media:\d+)$/.test(data))return false;
   if(data==='my_support_inbox'){await customerInbox(db,env,uid,messageId);return true;}
-  if(data==='my_support_new'){
+  if(data==='my_support_reply'||data==='my_support_new'){
+    // Legacy buttons also pass this guard; customers cannot start a conversation here.
+    const found=await db.prepare('SELECT 1 AS found FROM support_messages WHERE user_tg_id=? LIMIT 1').bind(uid).first();
+    if(!found){await customerInbox(db,env,uid,messageId);return true;}
     await setSession(db,uid,'support');
-    await sendText(env,uid,'✉️ أرسل نصاً أو صورة أو فيديو الآن. سيُحفظ تواصلك في «رسائلي» من القائمة الرئيسية.',keyboard([button('📨 رسائلي','my_support_inbox','primary')],[button('🏠 الرئيسية','home','danger')]));
+    await sendText(env,uid,choice(env,
+      '↩️ أرسل ردّك على المحادثة الحالية (نص أو صورة أو فيديو). لبدء تواصل جديد استخدم قسم «الدعم».',
+      '↩️ Reply to your existing conversation with text, photo or video. To start a new request, open Support.'),
+      keyboard([button(choice(env,'📨 رسائلي','📨 My Messages'),'my_support_inbox','primary')],[button(choice(env,'🏠 الرئيسية','🏠 Home'),'home','danger')]),{preserveText:true});
     return true;
   }
   if(data.startsWith('my_support_thread:')){
