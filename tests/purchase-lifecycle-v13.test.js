@@ -82,12 +82,12 @@ test('Home alone cleans tracked purchase confirmation + receipt + photo and neve
    await commitPurchase(db,env,101,nonce);
    await showReceipt(db,env,101,1);
    const listed=await readPurchaseViewIds(db,101);
-   assert.equal(listed.length,4); // old + confirm + text + photo
+   assert.equal(listed.length,3); // old + confirm + unified receipt photo card
    const deleteCount=()=>calls.filter(x=>x.method==='deleteMessage').length;
    await callback(db,101,'wallet_purchases',500,201);
    assert.equal(deleteCount(),0);
    await callback(db,101,'home',listed[1],202); // edit one tracked message into home
-   assert.equal(deleteCount(),3); // delete everything except the Home message
+   assert.equal(deleteCount(),2); // delete everything except the Home message
    assert.equal((await readPurchaseViewIds(db,101)).length,0);
    assert.equal(c.prepare('SELECT COUNT(*) n FROM wallet_purchases').get().n,1);
    assert.equal(c.prepare('SELECT COUNT(*) n FROM wallet_ledger WHERE kind=\'permitted_purchase\'').get().n,1);
