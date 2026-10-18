@@ -26,7 +26,7 @@ async function isStaticCustomEmoji(env,id){
 
 
 export function adminRoute(data){
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -35,7 +35,8 @@ async function homeButtonList(db,env,uid,page=0,messageId=null){
   const current=HOME_BUTTONS.slice(page*7,(page+1)*7);
   for(const b of current){
     const shown=resolvedHomeButton(visual,b.id,'ar');
-    rows.push([button(`${shown.icon?'✨':'▫️'} ${short(shown.text,35)}`,`admin_home_button:${b.id}`,'primary')]);
+    const shownState=visual[homeSettingKey(b.id,'visible')]==='false'?'🙈':'👁️';
+    rows.push([button(`${shownState} ${short(shown.text,35)}`,`admin_home_button:${b.id}`,'primary')]);
   }
   const nav=[];
   if(page)nav.push(button('⬅️ السابق',`admin_home_buttons:${page-1}`));
@@ -51,10 +52,13 @@ async function homeButtonDetail(db,env,uid,key,messageId=null){
   const visual=await loadVisualSettings(db);
   const ar=resolvedHomeButton(visual,key,'ar');
   const en=resolvedHomeButton(visual,key,'en');
-  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n🇬🇧 English: ${en.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
+  const visible=visual[homeSettingKey(key,'visible')]!=='false';
+  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n🇬🇧 English: ${en.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n👁️ الحالة: ${visible?'ظاهر':'مخفي'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
     [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
     [button('✏️ Edit English label',`admin_setting_edit:${homeSettingKey(key,'label_en')}`)],
     [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
+    ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)],[button('📝 Edit English Description',`admin_setting_edit:${homeSettingKey(key,'description_en')}`)]]:[]),
+    [button(visible?'🙈 إخفاء هذا الزر':'👁️ إظهار هذا الزر',`admin_home_button_toggle:${key}`,visible?'danger':'success')],
     [button('↩️ استعادة هذا الزر للأصل',`admin_home_button_reset:${key}`,'danger')],
     [button('🎨 قائمة أزرار الرئيسية','admin_home_buttons:0')],adminBack),messageId);
 }
@@ -329,11 +333,20 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await homeButtonList(db,env,uid,page,messageId);
   }
   else if(data.startsWith('admin_home_button:'))await homeButtonDetail(db,env,uid,data.split(':')[1],messageId);
+  else if(data.startsWith('admin_home_button_toggle:')){
+    const key=data.split(':')[1];
+    if(!HOME_BUTTONS.some(b=>b.id===key))return true;
+    const setting=homeSettingKey(key,'visible');
+    const current=await getSetting(db,setting,'true');
+    await updateSetting(db,setting,current==='false'?'true':'false',uid);
+    await audit(db,uid,'toggle_home_button','ui',0);
+    await homeButtonDetail(db,env,uid,key,messageId);
+  }
   else if(data==='admin_product_icons')await productIconsMenu(db,env,uid,messageId);
   else if(data.startsWith('admin_home_button_reset:')){
     const key=data.split(':')[1];
     if(!HOME_BUTTONS.some(b=>b.id===key))return true;
-    await Promise.all(['label_ar','label_en','icon','inline_ar','inline_en'].map(field=>updateSetting(db,homeSettingKey(key,field),'',uid)));
+    await Promise.all(['label_ar','label_en','icon','inline_ar','inline_en','visible',...(key==='messages'?['description_ar','description_en']:[])].map(field=>updateSetting(db,homeSettingKey(key,field),'',uid)));
     await audit(db,uid,'reset_home_button','ui',0);
     await homeButtonDetail(db,env,uid,key,messageId);
   }
@@ -346,7 +359,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data==='admin_home_reset_all_confirm'){
     const session=await getSession(db,uid);
     if(session?.action!=='owner_home_buttons_reset')return true;
-    for(const b of HOME_BUTTONS)for(const field of ['label_ar','label_en','icon','inline_ar','inline_en'])
+    for(const b of HOME_BUTTONS)for(const field of ['label_ar','label_en','icon','inline_ar','inline_en','visible',...(b.id==='messages'?['description_ar','description_en']:[])])
       await updateSetting(db,homeSettingKey(b.id,field),'',uid);
     await clearSession(db,uid);
     await audit(db,uid,'reset_all_home_buttons','ui',0);
@@ -372,6 +385,20 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await sendOrEditText(env,uid,'✅ تمت استعادة رسالة الترحيب الافتراضية بنجاح.\n\nستظهر الأسماء والأرصدة وعدد المستخدمين مباشرة من بياناتهم الحقيقية. وتظل إعدادات الرموز المتحركة الأخرى محفوظة.',keyboard(
       [button('👁️ معاينة الترحيب','admin_visual_preview','success')],
       [button('🎨 إعدادات الواجهة','admin_visuals','primary')],adminBack),messageId);
+  }
+  else if(data==='admin_maintenance'){
+    const active=(await getSetting(db,'maintenance_enabled','false'))==='true';
+    await sendOrEditText(env,uid,`🛠️ وضع الصيانة\n\nالحالة: ${active?'🔴 مفعّل':'🟢 المتجر يعمل'}\nعند التفعيل تتوقف واجهات العملاء مؤقتاً مع استمرار لوحة المدير وإمكانية إدارة الطلبات القديمة. لا يُحذف أي رصيد أو طلب.`,keyboard(
+      [button(active?'✅ إنهاء الصيانة':'🛠️ بدء الصيانة','admin_maintenance_toggle',active?'success':'danger')],
+      [button('📝 رسالة الصيانة العربية','admin_setting_edit:maintenance_message_ar','primary')],
+      [button('📝 English maintenance notice','admin_setting_edit:maintenance_message_en','primary')],
+      adminBack),messageId);
+  }
+  else if(data==='admin_maintenance_toggle'){
+    const active=(await getSetting(db,'maintenance_enabled','false'))==='true';
+    await updateSetting(db,'maintenance_enabled',active?'false':'true',uid);
+    await audit(db,uid,'toggle_maintenance','setting',0);
+    await handleAdminCallback(db,env,uid,'admin_maintenance',messageId);
   }
   else if(data==='admin_topup_setup')await topupSetup(db,env,uid,messageId);
   else if(data==='admin_rate_1520'){

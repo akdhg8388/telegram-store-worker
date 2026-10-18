@@ -158,7 +158,7 @@ export async function customerInbox(db,env,uid,messageId=null){
   const latest=await db.prepare('SELECT kind,direction,created_at FROM support_messages WHERE user_tg_id=? ORDER BY id DESC LIMIT 1').bind(uid).first();
   const en=languageOf(env)==='en';
   const defaultDescription=choice(env,'يمكنك مراجعة رسائلك وردود الإدارة والصور والفيديوهات وتاريخ كل رسالة.','Review your messages, support replies, photos, videos and message dates.');
-  const description=await getSetting(db,homeSettingKey('messages',en?'description_en':'description_ar'),defaultDescription);
+  const description=await getSetting(db,homeSettingKey('messages',en?'description_en':'description_ar'),'');
   const heading=choice(env,'📨 رسائلي — الدعم الفني','📨 My Messages — Support');
   const countLabel=choice(env,'📩 الرسائل المحفوظة: ','📩 Saved messages: ');
   const latestLabel=choice(env,'\n🕓 آخر تواصل: ','\n🕓 Last contact: ');

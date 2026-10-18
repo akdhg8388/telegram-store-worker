@@ -5,7 +5,7 @@ import {telegram,sendText,sendOrEditText,answerCallback,queueNotification,flushO
 import {ensureUser,getUser,setSession,getSession,clearSession,getProduct,audit} from './database.js';
 import * as ui from './ui.js';
 import {handleAdminCallback,handleAdminText} from './admin-controls.js';
-import {getSetting,storeAcceptsOrders} from './settings.js';
+import {getSetting,storeAcceptsOrders,maintenanceActive} from './settings.js';
 import {USD_PRESETS,formatQuote,usdRate,isTopupEnabled,receiverFor,quoteMinor,quoteFromUSD,parseCustomMinor,topupStatusMessage,baghdadDate} from './wallet.js';
 import {amountInIQD,topupDecisionText,guardUser} from './moderation.js';
 import {submitSupport,handleSupportCallback,handleSupportReply,handleCustomerSupportCallback} from './support.js';
@@ -129,6 +129,11 @@ async function handleMessage(db,env,ctx,message){
   const denied=await guardUser(db,env,uid);
   if(denied)return sendText(env,uid,denied);
   const text=String(message.text??'').trim();
+  if(!isAdmin(env,uid)&&await maintenanceActive(db)){
+    const en=env.__locale==='en';
+    const msg=await getSetting(db,en?'maintenance_message_en':'maintenance_message_ar',en?'🛠️ My Store is temporarily under maintenance. Please try again later.':'🛠️ المتجر تحت الصيانة مؤقتاً. يرجى المحاولة لاحقاً.');
+    return sendText(env,uid,msg|| (en?'🛠️ Temporarily under maintenance.':'🛠️ المتجر تحت الصيانة مؤقتاً.'));
+  }
   if(text.startsWith('/start')){
     await clearSession(db,uid);
     const ref=text.match(/^\/start(?:@\w+)?\s+ref_(\d+)$/)?.[1];
@@ -207,6 +212,7 @@ async function adminMenu(db,env,uid,messageId=null){
     [button('📨 رسائل الدعم الفني','support_inbox','primary'),button('🚫 إدارة المستخدمين','admin_users','primary')],
     [button('👤 التواصل المباشر مع المسؤول','admin_support_contact','primary')],
     [button('🎨 تخصيص واجهة المتجر','admin_visuals','primary')],
+    [button('🛠️ وضع الصيانة','admin_maintenance','danger')],
     [button('✅ مشتريات المستخدمين الناجحة','admin_wallet_sales','success')],
     [button('📦 بانتظار التسليم','admin_delivery')],
     [button('📦 المنتجات والأسعار','admin_products:0'),button('📂 الأقسام','admin_manage_categories')],
@@ -384,6 +390,11 @@ async function handleCallback(db,env,ctx,q){
   const denied=await guardUser(db,env,uid);
   if(denied)return sendText(env,uid,denied);
   const data=String(q.data||'');
+  if(!isAdmin(env,uid)&&await maintenanceActive(db)){
+    const en=env.__locale==='en';
+    const msg=await getSetting(db,en?'maintenance_message_en':'maintenance_message_ar',en?'🛠️ My Store is temporarily under maintenance. Please try again later.':'🛠️ المتجر تحت الصيانة مؤقتاً. يرجى المحاولة لاحقاً.');
+    return sendText(env,uid,msg||(en?'🛠️ Temporarily under maintenance.':'🛠️ المتجر تحت الصيانة مؤقتاً.'));
+  }
   if(await handleCustomerSupportCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleSupportCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleUserCallback(db,env,uid,data,q.message?.message_id))return;
