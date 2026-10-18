@@ -5,6 +5,7 @@ import {usdRate,formatUSD,baghdadDate} from './wallet.js';
 import {sendText,telegram} from './telegram.js';
 import {trackPurchaseView} from './purchase-views.js';
 import {warrantyLine} from './warranty.js';
+import {sendPhotoCard,cardEntities} from './product-card.js';
 
 export async function purchaseAvailability(db,p){
   if(!p || !p.active || !Number.isSafeInteger(p.price_iqd) || p.price_iqd<=0)
@@ -113,15 +114,38 @@ export async function showReceipt(db,env,uid,id){
   const details=short(english&&sale.current_description_en||sale.product_description||'—',650);
   const usage=short(english&&sale.current_usage_en||sale.usage_instructions||choice(env,'لم يضف المدير تعليمات إضافية.','No additional instructions provided.'),900);
   const warranty=warrantyLine(sale,languageOf(env));
-  const text=english
-   ?`✅ Purchase & delivery successful!\n\n🧾 Purchase: #${sale.id}\n🛍️ Product: ${name}\n📝 Details: ${details}\n⏳ Duration: ${sale.duration_months?sale.duration_months+' month(s)':'As specified for the item'}\n💰 Amount charged: ${format(sale.price_iqd)}${warranty?'\n'+warranty:''}\n💳 Remaining balance: ${format(current?.wallet_balance_iqd||0)}\n📅 Date & time: ${baghdadDate(sale.created_at,english?'en':'ar')}\n\n📦 Your delivered item:\n${short(sale.delivery_payload,1400)}\n\n📖 How to use:\n${usage}`
-   :`✅ تم الشراء والتسليم بنجاح!\n\n🧾 العملية: #${sale.id}\n🛍️ المنتج: ${name}\n📝 التفاصيل: ${details}\n⏳ المدة: ${sale.duration_months?sale.duration_months+' شهر':'حسب المنتج'}\n💰 المبلغ المخصوم: ${format(sale.price_iqd)}${warranty?'\n'+warranty:''}\n💳 رصيدك المتبقي: ${format(current?.wallet_balance_iqd||0)}\n📅 التاريخ والوقت: ${baghdadDate(sale.created_at,english?'en':'ar')}\n\n📦 بيانات المنتج المستلم:\n${short(sale.delivery_payload,1400)}\n\n📖 طريقة الاستخدام:\n${usage}`;
+  // Historical balance is calculated from the committed ledger, not from the
+  // customer's live balance, which can change after an old purchase.
+  const ledger=await db.prepare("SELECT id FROM wallet_ledger WHERE source_key=? AND user_tg_id=? LIMIT 1")
+    .bind('wallet_purchase:'+sale.id,uid).first();
+  const later=ledger?await db.prepare('SELECT COALESCE(SUM(delta_iqd),0) AS total FROM wallet_ledger WHERE user_tg_id=? AND id>?').bind(uid,ledger.id).first():null;
+  const remainder=ledger?Number(current?.wallet_balance_iqd||0)-Number(later?.total||0):Number(current?.wallet_balance_iqd||0);
+  const labels=english
+    ?['💰 Product price:','💸 Amount deducted:','💳 Balance after purchase:','📅 Purchase date & time:']
+    :['💰 سعر المنتج:','💸 الرصيد المخصوم:','💳 الرصيد بعد الشراء:','📅 تاريخ ووقت الشراء:'];
+  const itemLabel=choice(env,'📦 بيانات المنتج المستلم:','📦 Your delivered item:');
+  const usageLabel=choice(env,'📖 طريقة الاستخدام:','📖 How to use:');
+  const detailsLabel=choice(env,'📝 التفاصيل:','📝 Description:');
+  const text=[
+    choice(env,'✅ تم الشراء والتسليم بنجاح!','✅ Purchase & delivery successful!'),
+    '🧾 '+choice(env,'رقم العملية: ','Purchase #')+sale.id,
+    '🛍️ '+name,'',
+    detailsLabel+'\n'+details,'',
+    usageLabel+'\n'+usage,'',
+    itemLabel+'\n'+short(sale.delivery_payload,1400),'',
+    labels[0]+' '+format(sale.price_iqd),
+    labels[1]+' '+format(sale.price_iqd),
+    labels[2]+' '+format(remainder),
+    labels[3]+' '+baghdadDate(sale.created_at,english?'en':'ar'),
+    warranty||''
+  ].join('\n');
   const markup=keyboard([button('📦 مشترياتي','wallet_purchases','success')],[button('🏠 الرئيسية','home','primary')]);
-  try {const msg=await sendText(env,uid,text,markup,{preserveText:english});await trackPurchaseView(db,uid,msg);}catch(e){console.error('Wallet receipt Telegram failure',String(e));}
-  if(sale.photo_file_id){
-    try {const msg=await telegram(env,'sendPhoto',{chat_id:uid,photo:sale.photo_file_id,caption:english?`🖼️ ${name} — Purchase #${sale.id}`:`🖼️ صورة ${name} — عملية #${sale.id}`,_preserve_text:english});await trackPurchaseView(db,uid,msg);}
-    catch(e){console.error('Wallet receipt photo failure',String(e));}
-  }
+  const entities=cardEntities(text,labels);
+  try{
+    await sendPhotoCard(env,uid,sale.photo_file_id,text,markup,{
+      entities,preserveText:true,onMessage:msg=>trackPurchaseView(db,uid,msg)
+    });
+  }catch(e){console.error('Wallet receipt Telegram failure',String(e));}
   return sale;
 }
 export async function purchaseList(db,env,uid,messageId=null){
