@@ -346,7 +346,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_home_button_reset:')){
     const key=data.split(':')[1];
     if(!HOME_BUTTONS.some(b=>b.id===key))return true;
-    await Promise.all(['label_ar','label_en','icon','inline_ar','inline_en','visible',...(key==='messages'?['description_ar','description_en']:[])].map(field=>updateSetting(db,homeSettingKey(key,field),'',uid)));
+    await Promise.all(['label_ar','label_en','icon','inline_ar','inline_en','visible',...(key==='messages'?['description_ar','description_en']:[])].map(field=>updateSetting(db,homeSettingKey(key,field),field==='visible'?'true':'',uid)));
     await audit(db,uid,'reset_home_button','ui',0);
     await homeButtonDetail(db,env,uid,key,messageId);
   }
@@ -360,7 +360,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     const session=await getSession(db,uid);
     if(session?.action!=='owner_home_buttons_reset')return true;
     for(const b of HOME_BUTTONS)for(const field of ['label_ar','label_en','icon','inline_ar','inline_en','visible',...(b.id==='messages'?['description_ar','description_en']:[])])
-      await updateSetting(db,homeSettingKey(b.id,field),'',uid);
+      await updateSetting(db,homeSettingKey(b.id,field),field==='visible'?'true':'',uid);
     await clearSession(db,uid);
     await audit(db,uid,'reset_all_home_buttons','ui',0);
     await homeButtonList(db,env,uid,0,messageId);
