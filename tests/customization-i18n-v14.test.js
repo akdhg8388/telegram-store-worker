@@ -163,3 +163,58 @@ test('credentials and unique delivery data are not altered by the English locale
   });
  }finally{x.conn.close()}
 });
+
+
+test('V17 moves private messages into Home and can hide or restore any Home entry',async()=>{
+ const x=fixture();try{await mock(async calls=>{
+  await home(x.db,env,991);
+  assert.equal(flat(calls.at(-1)).find(b=>b.callback_data==='my_support_inbox').style,'primary');
+  assert.equal(adminRoute('admin_home_button_toggle:messages'),true);
+  await handleAdminCallback(x.db,env,991,'admin_home_button_toggle:messages',18);
+  await home(x.db,env,991);
+  assert.ok(!flat(calls.at(-1)).some(b=>b.callback_data==='my_support_inbox'));
+  await handleAdminCallback(x.db,env,991,'admin_home_button_toggle:messages',18);
+  await home(x.db,env,991);
+  assert.ok(flat(calls.at(-1)).some(b=>b.callback_data==='my_support_inbox'));
+  await handleAdminCallback(x.db,env,991,'admin_home_button_toggle:shop',18);
+  await home(x.db,env,991);
+  assert.ok(!flat(calls.at(-1)).some(b=>b.callback_data==='categories'));
+  await handleAdminCallback(x.db,env,991,'admin_home_button_reset:shop',18);
+  await home(x.db,env,991);
+  assert.ok(flat(calls.at(-1)).some(b=>b.callback_data==='categories'));
+ })}finally{x.conn.close()}
+});
+
+test('V17 custom Arabic and English messages descriptions remain private and independent',async()=>{
+ const x=fixture();try{await mock(async calls=>{
+  const ar=homeSettingKey('messages','description_ar');
+  const en=homeSettingKey('messages','description_en');
+  for(const [key,value] of [[ar,'وصف رسائلي الخاص'],[en,'My private support messages']]){
+   await handleAdminCallback(x.db,env,991,'admin_setting_edit:'+key,19);
+   await handleAdminText(x.db,env,991,{action:'owner_setting',payload:{key}},{text:value});
+  }
+  const {customerInbox}=await import('../src/support.js');
+  await customerInbox(x.db,env,991);
+  assert.match(calls.at(-1).body.text,/وصف رسائلي الخاص/);
+  await customerInbox(x.db,{...env,__locale:'en'},991);
+  assert.match(calls.at(-1).body.text,/My private support messages/);
+  assert.doesNotMatch(calls.at(-1).body.text,/وصف رسائلي الخاص/);
+ })}finally{x.conn.close()}
+});
+
+test('V17 maintenance stops customer messages and callbacks while owner keeps control',async()=>{
+ const x=fixture();try{await mock(async calls=>{
+  assert.ok(adminRoute('admin_maintenance'));
+  await handleAdminCallback(x.db,env,991,'admin_maintenance_toggle',20);
+  assert.equal(x.conn.prepare("SELECT value FROM bot_settings WHERE key='maintenance_enabled'").get().value,'true');
+  let id=90000;const ctx={waitUntil:()=>{}};
+  await processUpdate(x.db,env,ctx,{update_id:++id,message:{message_id:130,chat:{id:101,type:'private'},from:{id:101,first_name:'John'},text:'/start'}});
+  assert.match(calls.at(-1).body.text,/maintenance/i);
+  await processUpdate(x.db,env,ctx,{update_id:++id,callback_query:{id:'v17',from:{id:101,first_name:'John'},message:{chat:{id:101,type:'private'},message_id:99},data:'buy:1'}});
+  assert.match(calls.at(-1).body.text,/maintenance/i);
+  await handleAdminCallback(x.db,env,991,'admin_maintenance_toggle',20);
+  assert.equal(x.conn.prepare("SELECT value FROM bot_settings WHERE key='maintenance_enabled'").get().value,'false');
+  await home(x.db,env,101);
+  assert.ok(flat(calls.at(-1)).some(b=>b.callback_data==='my_support_inbox'));
+ })}finally{x.conn.close()}
+});
