@@ -8,6 +8,7 @@ import {loadVisualSettings,homeActionButton,homeUrlButton,isHomeButtonVisible,wi
 import {languageOf,choice,translateUi} from './i18n.js';
 import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage,validRate} from './wallet.js';
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
+import {sendPhotoCard,cardEntities} from './product-card.js';
 
 export async function home(db,env,uid,messageId=null) {
   const lang=languageOf(env);
@@ -95,16 +96,38 @@ export async function productView(db,env,uid,id,messageId=null){
   const stockText=status.ready?`🟢 ${choice(env,'متوفر • المخزون الجاهز:','Available • Ready stock:')} ${status.count??choice(env,'متاح','Available')}`:`🔴 ${choice(env,'غير متوفر •','Unavailable •')} ${languageOf(env)==='en'?translateUi(status.reason,'en'):status.reason}`;
   const rate=validRate(visual.usd_rate_iqd);
   const shown=p.price_iqd?(user?.currency_preference==='USD'&&rate?formatUSD(Math.round(p.price_iqd*100/rate)):formatIQD(p.price_iqd)):choice(env,'لم يحدد','Not specified');
-  const text=languageOf(env)==='en'
-    ?`🛍️ ${short(languageOf(env)==='en'&&p.title_en||p.title,150)}\n\n${desc}\n\n⏳ Duration: ${p.duration_months?p.duration_months+' month(s)':'As specified for the service'}\n💰 Price: ${shown}\n📦 ${stockText}\n\n${status.ready?'✅ Instant delivery after wallet payment.':'⛔ Purchasing is disabled until the owner configures delivery.'}${visual.purchase_instructions?'\n\n'+short(visual.purchase_instructions,700):''}`
-    :`🛍️ ${short(languageOf(env)==='en'&&p.title_en||p.title,150)}\n\n${desc}\n\n⏳ المدة: ${p.duration_months?p.duration_months+' شهر':'حسب تفاصيل الخدمة'}\n💰 السعر: ${shown}\n📦 ${stockText}\n\n${status.ready?'✅ يتم التسليم تلقائياً بعد الشراء من المحفظة.':'⛔ لا يمكن الشراء حتى يجهّز المدير بيانات التسليم.'}${visual.purchase_instructions?'\n\n'+short(visual.purchase_instructions,700):''}`;
+  const en=languageOf(env)==='en';
+  const title=short(en&&p.title_en||p.title,150);
+  const how=short(en&&p.usage_instructions_en||p.usage_instructions||choice(env,'لم تُضف تعليمات بعد.','No usage instructions provided.'),1800);
+  const mode=p.fulfillment_mode==='unique'
+    ?choice(env,'🔑 تسليم كود أو رابط فريد','🔑 Unique code or link')
+    :p.fulfillment_mode==='shared'
+      ?choice(env,'📦 تسليم محتوى رقمي','📦 Digital content delivery')
+      :choice(env,'⏸️ غير مفعّل','⏸️ Disabled');
+  const priceLabel=choice(env,'💰 السعر:','💰 Price:');
+  const stockLabel=choice(env,'📦 المخزون:','📦 Stock:');
+  const deliveryLabel=choice(env,'🚚 نوع التسليم:','🚚 Delivery type:');
+  const howLabel=choice(env,'📖 التعليمات:','📖 Instructions:');
+  const detailLabel=choice(env,'📝 التفاصيل:','📝 Details:');
+  const durationLabel=choice(env,'⏳ المدة:','⏳ Duration:');
+  const text=[
+    '🛍️ '+title,'',detailLabel+'\n'+desc,'',
+    howLabel+'\n'+how,'',deliveryLabel+' '+mode,
+    durationLabel+' '+(p.duration_months?p.duration_months+(en?' month(s)':' شهر'):choice(env,'حسب تفاصيل الخدمة','As specified for the service')),
+    priceLabel+' '+shown,stockLabel+' '+stockText,'',
+    status.ready?choice(env,'✅ يُسلّم المنتج تلقائياً بعد الدفع بالمحفظة.','✅ Delivered automatically after wallet payment.'):
+      choice(env,'⛔ المنتج غير جاهز للشراء حالياً.','⛔ This product is not currently available for purchase.'),
+    visual.purchase_instructions?'\n'+short(visual.purchase_instructions,700):''
+  ].filter(x=>x!==null&&x!==undefined).join('\n');
   const warranty=warrantyLine(p,languageOf(env));
   const decorated=decorateProductText(warranty?text+'\n\n'+warranty:text,{product:emojiId(icon),price:emojiId(visual.price_custom_emoji_id),stock:emojiId(visual.stock_custom_emoji_id)});
-  return sendOrEditText(env,uid,decorated.text,keyboard(
+  const markup=keyboard(
     [withButtonIcon(button(stockText,`product:${id}`,status.ready?'success':'danger'),visual.stock_custom_emoji_id)],
     status.ready?[withButtonIcon(button('🛒 شراء فوري من المحفظة',`buy:${id}`,'success'),icon)]:[],
     [button(fav?'💔 إزالة من المفضلة':'💗 إضافة للمفضلة',`favorite:${id}`,'primary')],
-    [button('🔄 تحديث المخزون',`product:${id}`,'primary'),button('🛍️ الأقسام','categories','primary')],backRow()),messageId,{...decorated.options,preserveText:languageOf(env)==='en'});
+    [button('🔄 تحديث المخزون',`product:${id}`,'primary'),button('🛍️ الأقسام','categories','primary')],backRow());
+  const entities=cardEntities(decorated.text,[priceLabel,stockLabel,deliveryLabel],decorated.options?.entities||[]);
+  return sendPhotoCard(env,uid,p.photo_file_id,decorated.text,markup,{messageId,entities,preserveText:en});
 }
 export async function walletSummary(db,uid){
   const u=await getUser(db,uid);
