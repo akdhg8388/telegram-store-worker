@@ -12,6 +12,7 @@ import {submitSupport,handleSupportCallback,handleSupportReply,handleCustomerSup
 import {handleUserCallback,handleUserText} from './admin-users.js';
 import {beginPurchase,commitPurchase,showReceipt,purchaseList} from './wallet-purchase.js';
 import {readPurchaseViewIds,cleanupPurchaseViews} from './purchase-views.js';
+import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}) {
   for(const admin of adminIds(env)) {
@@ -134,6 +135,10 @@ async function handleMessage(db,env,ctx,message){
     const msg=await getSetting(db,en?'maintenance_message_en':'maintenance_message_ar',en?'🛠️ My Store is temporarily under maintenance. Please try again later.':'🛠️ المتجر تحت الصيانة مؤقتاً. يرجى المحاولة لاحقاً.');
     return sendText(env,uid,msg|| (en?'🛠️ Temporarily under maintenance.':'🛠️ المتجر تحت الصيانة مؤقتاً.'));
   }
+  if(!isAdmin(env,uid)){
+    const gate=await gateState(db,env,uid);
+    if(!gate.allowed)return showGate(db,env,uid,gate);
+  }
   if(text.startsWith('/start')){
     await clearSession(db,uid);
     const ref=text.match(/^\/start(?:@\w+)?\s+ref_(\d+)$/)?.[1];
@@ -178,6 +183,7 @@ async function handleMessage(db,env,ctx,message){
   }
   const session=await getSession(db,uid);
   if(session){
+    if(session.action.startsWith('owner_') && await handleChannelAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleUserText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleAdminText(db,env,uid,session,message))return;
     if(session.action==='owner_support_reply' && await handleSupportReply(db,env,uid,session,message))return;
@@ -213,6 +219,7 @@ async function adminMenu(db,env,uid,messageId=null){
     [button('👤 التواصل المباشر مع المسؤول','admin_support_contact','primary')],
     [button('🎨 تخصيص واجهة المتجر','admin_visuals','primary')],
     [button('🛠️ وضع الصيانة','admin_maintenance','danger')],
+    [button('📢 الاشتراك الإجباري','required_manage','primary')],
     [button('✅ مشتريات المستخدمين الناجحة','admin_wallet_sales','success')],
     [button('📦 بانتظار التسليم','admin_delivery')],
     [button('📦 المنتجات والأسعار','admin_products:0'),button('📂 الأقسام','admin_manage_categories')],
@@ -395,6 +402,17 @@ async function handleCallback(db,env,ctx,q){
     const msg=await getSetting(db,en?'maintenance_message_en':'maintenance_message_ar',en?'🛠️ My Store is temporarily under maintenance. Please try again later.':'🛠️ المتجر تحت الصيانة مؤقتاً. يرجى المحاولة لاحقاً.');
     return sendText(env,uid,msg||(en?'🛠️ Temporarily under maintenance.':'🛠️ المتجر تحت الصيانة مؤقتاً.'));
   }
+  if(data==='required_verify'){
+    const gate=await gateState(db,env,uid);
+    if(!gate.allowed)return showGate(db,env,uid,gate,q.message?.message_id);
+    await clearSession(db,uid);
+    return ui.home(db,env,uid,q.message?.message_id);
+  }
+  if(!isAdmin(env,uid)){
+    const gate=await gateState(db,env,uid);
+    if(!gate.allowed)return showGate(db,env,uid,gate,q.message?.message_id);
+  }
+  if(await handleChannelAdmin(db,env,uid,data,q.message?.message_id))return;
   if(await handleCustomerSupportCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleSupportCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleUserCallback(db,env,uid,data,q.message?.message_id))return;

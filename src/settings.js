@@ -37,6 +37,7 @@ export const SETTING_FIELDS=Object.freeze({
   manual_topups_enabled: {label:'💳 تشغيل طلبات شحن المحفظة',max:5,toggle:true},
   store_enabled: {label:'🔌 استقبال طلبات جديدة',max:5,toggle:true},
   maintenance_enabled: {label:'🛠️ وضع الصيانة',max:5,toggle:true},
+  required_channels_enabled: {label:'📢 الاشتراك الإجباري',max:5,toggle:true},
   maintenance_message_ar: {label:'🛠️ رسالة الصيانة بالعربي',max:800},
   maintenance_message_en: {label:'🛠️ Maintenance message (English)',max:800},
   ...homeButtonSettings(),
