@@ -107,7 +107,13 @@ export async function showReceipt(db,env,uid,id){
       p.usage_instructions_en AS current_usage_en
     FROM wallet_purchases w LEFT JOIN products p ON p.id=w.product_id WHERE w.id=? AND w.user_tg_id=?`).bind(id,uid).first();
   if(!sale)return sendText(env,uid,'لا توجد عملية شراء بهذا الرقم لحسابك.');
-  const [current,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
+  // Run independent reads together; never alter the existing atomic purchase,
+  // ledger, inventory, or one-code-per-buyer logic.
+  const [current,rate,ledger]=await Promise.all([
+    getUser(db,uid),usdRate(db),
+    db.prepare("SELECT id FROM wallet_ledger WHERE source_key=? AND user_tg_id=? LIMIT 1")
+      .bind('wallet_purchase:'+sale.id,uid).first()
+  ]);
   const format=value=>current?.currency_preference==='USD'&&rate?formatUSD(Math.round(Number(value)*100/rate)):formatIQD(value);
   const english=languageOf(env)==='en';
   const name=short(english&&sale.current_title_en||sale.product_name,150);
@@ -116,8 +122,6 @@ export async function showReceipt(db,env,uid,id){
   const warranty=warrantyLine(sale,languageOf(env));
   // Historical balance is calculated from the committed ledger, not from the
   // customer's live balance, which can change after an old purchase.
-  const ledger=await db.prepare("SELECT id FROM wallet_ledger WHERE source_key=? AND user_tg_id=? LIMIT 1")
-    .bind('wallet_purchase:'+sale.id,uid).first();
   const later=ledger?await db.prepare('SELECT COALESCE(SUM(delta_iqd),0) AS total FROM wallet_ledger WHERE user_tg_id=? AND id>?').bind(uid,ledger.id).first():null;
   const remainder=ledger?Number(current?.wallet_balance_iqd||0)-Number(later?.total||0):Number(current?.wallet_balance_iqd||0);
   const labels=english

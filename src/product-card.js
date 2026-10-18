@@ -35,7 +35,12 @@ export async function sendPhotoCard(env,uid,photo,text,markup,options={}){
     ...(parts.captionEntities.length?{caption_entities:parts.captionEntities}:{}),
     ...(preserveText?{_preserve_text:true}:{})};
   let sent;
-  if(Number.isSafeInteger(messageId)&&messageId>0){
+  // Edit captions only when the originating callback really came from media.
+  // A normal text menu has no caption; skipping that invalid API call makes
+  // the transition into a photo product card both faster and more reliable.
+  const canEditCaption=Number.isSafeInteger(messageId)&&messageId>0 &&
+    (!env.__callback_message_id || (env.__callback_media&&messageId===env.__callback_message_id));
+  if(canEditCaption){
     try{
       const {photo:_photo,...edit}=params;
       sent=await telegram(env,'editMessageCaption',{...edit,message_id:messageId});
@@ -43,7 +48,7 @@ export async function sendPhotoCard(env,uid,photo,text,markup,options={}){
       if(/message is not modified/i.test(String(error)))return null;
       // Only media-caption mismatch/edit restrictions are safe to retry by
       // sending a new photo. Preserve other failures (e.g. rate limits).
-      if(!/there is no caption|message to edit not found|message can't be edited|message identifier is not specified|message is not a media message|no media|message has no caption/i.test(String(error)))throw error;
+      if(!/there is no caption|message to edit not found|message can't be edited|message identifier is not specified|message is not a media message|no media|message has no caption|message is not a photo message|message is not a photo or video/i.test(String(error)))throw error;
     }
   }
   if(!sent){

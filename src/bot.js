@@ -127,10 +127,12 @@ async function handleMessage(db,env,ctx,message){
   const uid=message.from?.id;
   if(!uid || !message.chat || message.chat.type!=='private') return;
   await ensureUser(db,message.from);
-  const denied=await guardUser(db,env,uid);
+  const [denied,underMaintenance]=await Promise.all([
+    guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve(false):maintenanceActive(db)
+  ]);
   if(denied)return sendText(env,uid,denied);
   const text=String(message.text??'').trim();
-  if(!isAdmin(env,uid)&&await maintenanceActive(db)){
+  if(underMaintenance){
     const en=env.__locale==='en';
     const msg=await getSetting(db,en?'maintenance_message_en':'maintenance_message_ar',en?'🛠️ My Store is temporarily under maintenance. Please try again later.':'🛠️ المتجر تحت الصيانة مؤقتاً. يرجى المحاولة لاحقاً.');
     return sendText(env,uid,msg|| (en?'🛠️ Temporarily under maintenance.':'🛠️ المتجر تحت الصيانة مؤقتاً.'));
@@ -394,10 +396,12 @@ async function handleCallback(db,env,ctx,q){
   // Answer the callback in parallel with database work for a responsive interface.
   ctx.waitUntil(answerCallback(env,q.id).catch(e=>console.error('callback acknowledgement',String(e))));
   await ensureUser(db,q.from);
-  const denied=await guardUser(db,env,uid);
+  const [denied,underMaintenance]=await Promise.all([
+    guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve(false):maintenanceActive(db)
+  ]);
   if(denied)return sendText(env,uid,denied);
   const data=String(q.data||'');
-  if(!isAdmin(env,uid)&&await maintenanceActive(db)){
+  if(underMaintenance){
     const en=env.__locale==='en';
     const msg=await getSetting(db,en?'maintenance_message_en':'maintenance_message_ar',en?'🛠️ My Store is temporarily under maintenance. Please try again later.':'🛠️ المتجر تحت الصيانة مؤقتاً. يرجى المحاولة لاحقاً.');
     return sendText(env,uid,msg||(en?'🛠️ Temporarily under maintenance.':'🛠️ المتجر تحت الصيانة مؤقتاً.'));
@@ -643,7 +647,12 @@ export async function processUpdate(db,env,ctx,update){
   }
   // Per-update locale, never mutate the shared Cloudflare environment.
   const incomingId=update.callback_query?.from?.id||update.message?.from?.id||update.pre_checkout_query?.from?.id;
-  env={...env,__locale:await userLanguage(db,incomingId)};
+  // Media-message callbacks cannot be edited using editMessageText. Carry the
+  // source type only for this update to avoid a failing Telegram API round trip.
+  const source=update.callback_query?.message;
+  env={...env,__locale:await userLanguage(db,incomingId),
+    __callback_message_id:source?.message_id??null,
+    __callback_media:!!(source?.photo?.length||source?.video||source?.animation||source?.document)};
   if(update.pre_checkout_query) await telegram(env,'answerPreCheckoutQuery',{pre_checkout_query_id:update.pre_checkout_query.id,ok:false,error_message:'تم إيقاف نظام النجوم للطلبات الجديدة. تواصل مع الدعم بشأن الطلبات السابقة.'});
   else if(update.message?.successful_payment) {
     await ensureUser(db,update.message.from);

@@ -126,7 +126,7 @@ export async function productView(db,env,uid,id,messageId=null){
     status.ready?[withButtonIcon(button('🛒 شراء فوري من المحفظة',`buy:${id}`,'success'),icon)]:[],
     [button(fav?'💔 إزالة من المفضلة':'💗 إضافة للمفضلة',`favorite:${id}`,'primary')],
     [button('🔄 تحديث المخزون',`product:${id}`,'primary'),button('🛍️ الأقسام','categories','primary')],backRow());
-  const entities=cardEntities(decorated.text,[priceLabel,stockLabel,deliveryLabel],decorated.options?.entities||[]);
+  const entities=cardEntities(decorated.text,[priceLabel,stockLabel,deliveryLabel,durationLabel],decorated.options?.entities||[]);
   return sendPhotoCard(env,uid,p.photo_file_id,decorated.text,markup,{messageId,entities,preserveText:en});
 }
 export async function walletSummary(db,uid){

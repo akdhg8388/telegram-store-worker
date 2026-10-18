@@ -40,7 +40,11 @@ export async function sendText(env,chat_id,text,reply_markup,options={}) {
 }
 
 export async function sendOrEditText(env, chat_id, text, reply_markup, message_id, options={}) {
-  if (!Number.isSafeInteger(message_id) || message_id <= 0) return sendText(env,chat_id,text,reply_markup,options);
+  // An inline keyboard on a Telegram PHOTO is not editable as a text message.
+  // Send the requested page directly, avoiding a failed edit and preserving buttons.
+  if (!Number.isSafeInteger(message_id) || message_id <= 0 ||
+      (env.__callback_media && message_id===env.__callback_message_id))
+    return sendText(env,chat_id,text,reply_markup,options);
   try {
     return await telegram(env,'editMessageText',{
       chat_id,message_id,text:String(text).slice(0,4000),...(reply_markup?{reply_markup}:{}),...(options?.entities?{entities:options.entities}:{}),...(options?.preserveText?{_preserve_text:true}:{})
@@ -53,7 +57,7 @@ export async function sendOrEditText(env, chat_id, text, reply_markup, message_i
       if(safe.length===options.entities.length)throw error;
       return sendOrEditText(env,chat_id,text,reply_markup,message_id,{...(safe.length?{entities:safe}:{}),...(options?.preserveText?{preserveText:true}:{})});
     }
-    if(/message to edit not found|message can't be edited|message identifier is not specified/i.test(msg))
+    if(/message to edit not found|message can't be edited|message identifier is not specified|there is no text in the message to edit|message is not a text message|message has no text/i.test(msg))
       return sendText(env,chat_id,text,reply_markup,options);
     throw error;
   }
