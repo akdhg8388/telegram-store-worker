@@ -117,7 +117,7 @@ test('product, price and stock emoji are included as separate valid Telegram ent
     await productView(x.db,{...env,__locale:'en'},101,1);
     const detail=calls[1].body;
     assert.equal(detail.entities.filter(e=>e.type==='custom_emoji').length,3);
-    assert.equal(detail.entities.filter(e=>e.type==='bold').length,3);
+    assert.equal(detail.entities.filter(e=>e.type==='bold').length,4);
     for(const e of detail.entities.filter(e=>e.type==='custom_emoji')){
       assert.equal(e.type,'custom_emoji');
       assert.ok(/^\d{10,30}$/.test(e.custom_emoji_id));
