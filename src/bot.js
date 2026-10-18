@@ -24,6 +24,29 @@ async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}
 async function notifyUser(db,uid,text,markup=null) {
   await queueNotification(db,'sendMessage',{chat_id:uid,text:short(text,3900),...(markup?{reply_markup:markup}:{})});
 }
+// These are presentation-only messages; NEVER touch financial records on deletion.
+async function trackTopupAdminMessage(db,adminId,topupId,messageId){
+  if(!Number.isSafeInteger(messageId)||messageId<=0)return;
+  await db.prepare('INSERT OR IGNORE INTO topup_admin_messages(admin_tg_id,topup_id,message_id) VALUES(?,?,?)')
+    .bind(adminId,topupId,messageId).run();
+}
+async function safelyDeleteTopupMessage(env,chatId,messageId){
+  if(!Number.isSafeInteger(messageId)||messageId<=0)return;
+  try{await telegram(env,'deleteMessage',{chat_id:chatId,message_id:messageId});}
+  catch(error){console.error('Topup chat cleanup skipped',String(error));}
+}
+async function cleanupSettledTopup(db,env,adminId,topupId,sourceMessageId,noticeMessageId){
+  const records=(await db.prepare('SELECT message_id FROM topup_admin_messages WHERE admin_tg_id=? AND topup_id=?').bind(adminId,topupId).all()).results||[];
+  const ids=[sourceMessageId,noticeMessageId,...records.map(x=>x.message_id)].filter(x=>Number.isSafeInteger(x)&&x>0);
+  await Promise.all([...new Set(ids)].map(async mid=>{
+    try{await telegram(env,'deleteMessage',{chat_id:adminId,message_id:mid});}
+    catch{
+      // Old or undeletable Telegram messages still must not offer usable decisions.
+      try{await telegram(env,'editMessageReplyMarkup',{chat_id:adminId,message_id:mid,reply_markup:{inline_keyboard:[]}});}catch{}
+    }
+  }));
+  await db.prepare('DELETE FROM topup_admin_messages WHERE admin_tg_id=? AND topup_id=?').bind(adminId,topupId).run();
+}
 async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   if(!await isTopupEnabled(db,env))return sendText(env,uid,'⛔ تم إيقاف استقبال طلبات الشحن مؤقتاً.');
   const p=session.payload;
@@ -56,7 +79,9 @@ async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${moneyMethods[p.method]}\n💰 المطلوب: ${formatQuote(p)}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
   await notifyAdmins(db,env,text,p.proofFileId||null,keyboard([button('📋 فتح طلب الشحن',`topup_detail:${id}`,'primary')]),{topupRequestId:id});
   ctx.waitUntil(flushOutbox(db,env));
-  return sendText(env,uid,`🟡 تم إرسال طلب الشحن #${id} للمراجعة.\n\n💰 ${formatQuote(p)}\n💸 ${moneyMethods[p.method]}\n🗓️ ${baghdadDate(record.created_at)}\n\nتابع حالته من «طلباتي».`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
+  const confirmation=await sendText(env,uid,`🟡 تم إرسال طلب الشحن #${id} للمراجعة.\n\n💰 ${formatQuote(p)}\n💸 ${moneyMethods[p.method]}\n🗓️ ${baghdadDate(record.created_at)}\n\nتابع حالته من «طلباتي».`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
+  if(source)ctx.waitUntil(safelyDeleteTopupMessage(env,uid,source));
+  return confirmation;
 }
 async function handleTextState(db,env,ctx,uid,message,session) {
   if(session.action.startsWith('topup_') && !await isTopupEnabled(db,env)){
@@ -309,19 +334,23 @@ async function topupDetail(db,env,uid,id,messageId=null){
   if(t.proof_file_id)rows.push([button('📷 عرض صورة الإثبات',`topup_photo:${id}`,'primary')]);
   if(t.status==='pending')rows.push([button('✅ مراجعة القبول',`topup_approve:${id}`,'success'),button('❌ رفض',`topup_reject:${id}`,'danger')]);
   rows.push([button('↩️ الطلبات المعلّقة','admin_topups','primary')]);
-  return sendOrEditText(env,uid,summary,keyboard(...rows),messageId);
+  const sent=await sendOrEditText(env,uid,summary,keyboard(...rows),messageId);
+  await trackTopupAdminMessage(db,uid,id,sent?.message_id||messageId);
+  return sent;
 }
 async function showTopupApproval(db,env,uid,id,amount,messageId=null){
   if(!isAdmin(env,uid))return;
   const row=await db.prepare("SELECT * FROM topup_requests WHERE id=? AND status='pending'").bind(id).first();
   if(!row)return sendText(env,uid,'تمت معالجة الطلب مسبقاً.');
   if(!amountInIQD(String(amount),row.amount_iqd))return sendText(env,uid,'المبلغ غير صالح.');
-  return sendOrEditText(env,uid,topupDecisionText(row,amount),keyboard(
+  const sent=await sendOrEditText(env,uid,topupDecisionText(row,amount),keyboard(
     [button('✅ اعتماد الشحن نهائياً',`topup_commit:${id}:${amount}`,'success')],
     [button('✏️ تعديل المبلغ',`topup_amount:${id}`,'primary')],
     [button('↩️ مراجعة الطلب',`topup_detail:${id}`,'danger')]),messageId);
+  await trackTopupAdminMessage(db,uid,id,sent?.message_id||messageId);
+  return sent;
 }
-async function settleTopup(db,env,uid,id,amount=null,messageId=null){
+async function settleTopup(db,env,ctx,uid,id,amount=null,messageId=null){
   if(!isAdmin(env,uid))return;
   const row=await db.prepare("SELECT * FROM topup_requests WHERE id=? AND status='pending'").bind(id).first();
   if(!row)return sendText(env,uid,'⚠️ تمت معالجة الطلب سابقاً. لم تتم إضافة أي رصيد جديد.');
@@ -341,11 +370,10 @@ async function settleTopup(db,env,uid,id,amount=null,messageId=null){
   const notice=approved?`✅ تم شحن محفظتك بنجاح!\n\n🧾 رقم الطلب: #${id}\n💰 المبلغ المطلوب: ${formatIQD(current.amount_iqd)}\n✅ المبلغ المضاف فعلياً: ${formatIQD(amount)}\n💳 رصيد المحفظة: ${formatIQD(customer.wallet_balance_iqd)}\n💸 الوسيلة: ${moneyMethods[current.method]}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت الاعتماد: ${baghdadDate(current.decided_at)}\n🟢 الحالة: مكتملة\n\nشكراً لاستخدامك My Store.`
     :`❌ تم رفض طلب شحن المحفظة #${id}.\n\n💰 المبلغ المطلوب: ${formatIQD(current.amount_iqd)}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت القرار: ${baghdadDate(current.decided_at)}\nلم تتم إضافة أي مبلغ. للمساعدة افتح قسم الدعم.`;
   await notifyUser(db,current.user_tg_id,notice,keyboard([button('📦 طلباتي','orders','primary'),button('💳 محفظتي','wallet','success')]));
-  // Remove action buttons from original notice, even if approval happened in the admin list.
-  const ids=[current.admin_notice_message_id,messageId].filter(n=>Number.isSafeInteger(n)&&n>0);
-  for(const mid of new Set(ids)){
-    try{await telegram(env,'editMessageReplyMarkup',{chat_id:uid,message_id:mid,reply_markup:{inline_keyboard:[]}})}catch{}
-  }
+  // Financial commit and customer notification are already durable. Cleanup is
+  // best-effort and scheduled separately to keep approval latency low.
+  ctx.waitUntil(cleanupSettledTopup(db,env,uid,id,messageId,current.admin_notice_message_id)
+    .catch(e=>console.error('Topup admin cleanup',String(e))));
   return sendOrEditText(env,uid,`${approved?'✅ اعتُمد شحن':'❌ رُفض'} الطلب #${id}\n💰 المطلوب: ${formatIQD(current.amount_iqd)}${approved?'\n✅ المضاف: '+formatIQD(amount):''}\n🗓️ وقت القرار: ${baghdadDate(current.decided_at)}\nتم حفظ القرار وإشعار العميل.`,keyboard([button('📁 الطلبات المعالجة','admin_topups_done','primary')],[button('↩️ طلبات الشحن','admin_topups','primary')]),null);
 }
 async function completedTopups(db,env,uid,messageId=null){
@@ -578,8 +606,8 @@ async function handleCallback(db,env,ctx,q){
     await setSession(db,uid,'owner_topup_amount',{id});
     return sendText(env,uid,`✏️ أدخل المبلغ الذي وصل فعلياً بالدينار العراقي للطلب #${id}.\nالمبلغ المطلوب: ${formatIQD(row.amount_iqd)}\nيمكنك اعتماد مبلغ أقل؛ مثال: 100000\nللإلغاء /cancel.`);
   }
-  if(data.startsWith('topup_commit:')){const [,rawId,rawAmt]=data.split(':');return settleTopup(db,env,uid,Number(rawId),Number(rawAmt),q.message?.message_id)}
-  if(data.startsWith('topup_reject:'))return settleTopup(db,env,uid,Number(data.split(':')[1]),null,q.message?.message_id);
+  if(data.startsWith('topup_commit:')){const [,rawId,rawAmt]=data.split(':');return settleTopup(db,env,ctx,uid,Number(rawId),Number(rawAmt),q.message?.message_id)}
+  if(data.startsWith('topup_reject:'))return settleTopup(db,env,ctx,uid,Number(data.split(':')[1]),null,q.message?.message_id);
   if(data.startsWith('topup_approve:')){const id=Number(data.split(':')[1]);const row=await db.prepare("SELECT * FROM topup_requests WHERE id=? AND status='pending'").bind(id).first();return row?showTopupApproval(db,env,uid,id,row.amount_iqd):sendText(env,uid,'الطلب تمت معالجته.')} 
   if(data==='admin_wallet_sales' || /^admin_wallet_sales:\d+$/.test(data))
     return adminWalletSales(db,env,uid,Math.min(100,Number(data.split(':')[1]||0)),q.message?.message_id);
