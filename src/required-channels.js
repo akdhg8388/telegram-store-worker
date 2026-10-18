@@ -11,12 +11,19 @@ const linkFor=(id,url)=>url||(id.startsWith('@')?'https://t.me/'+id.slice(1):'')
 export async function listRequired(db){return (await db.prepare('SELECT * FROM required_channels WHERE active=1 ORDER BY id LIMIT 30').all()).results||[];}
 export async function gateState(db,env,uid){
  if(isAdmin(env,uid)||(await getSetting(db,'required_channels_enabled','false'))!=='true')return {allowed:true,missing:[]};
- const channels=await listRequired(db);const missing=[];
- for(const c of channels){
-   try{const m=await telegram(env,'getChatMember',{chat_id:c.chat_id,user_id:uid});
-     if(!['creator','administrator','member'].includes(m?.status)&&!(m?.status==='restricted'&&m.is_member===true))missing.push(c);
-   }catch(error){console.error('Channel membership lookup unavailable',c.id,String(error).replace(/bot\d+:[A-Za-z0-9_-]+/g,'bot[hidden]'));missing.push(c);}
- }
+ const channels=await listRequired(db);
+ // Concurrent Telegram checks remove the additive round-trip latency when
+ // several required channels are enabled; still fail closed on any error.
+ const results=await Promise.all(channels.map(async c=>{
+   try{
+     const m=await telegram(env,'getChatMember',{chat_id:c.chat_id,user_id:uid});
+     return ['creator','administrator','member'].includes(m?.status)||(m?.status==='restricted'&&m.is_member===true)?null:c;
+   }catch(error){
+     console.error('Channel membership lookup unavailable',c.id,String(error).replace(/bot\d+:[A-Za-z0-9_-]+/g,'bot[hidden]'));
+     return c;
+   }
+ }));
+ const missing=results.filter(Boolean);
  return {allowed:missing.length===0,missing};
 }
 export async function showGate(db,env,uid,state,messageId=null){
