@@ -38,6 +38,9 @@ export const SETTING_FIELDS=Object.freeze({
   store_enabled: {label:'🔌 استقبال طلبات جديدة',max:5,toggle:true},
   maintenance_enabled: {label:'🛠️ وضع الصيانة',max:5,toggle:true},
   required_channels_enabled: {label:'📢 الاشتراك الإجباري',max:5,toggle:true},
+  referral_welcome_bonus_iqd: {label:'🎉 هدية المدعو بالدينار',max:7},
+  referral_notice_ar: {label:'📝 إشعار مكافأة الإحالة',max:160},
+  referral_notice_en: {label:'📝 Referral reward notification',max:160},
   maintenance_message_ar: {label:'🛠️ رسالة الصيانة بالعربي',max:800},
   maintenance_message_en: {label:'🛠️ Maintenance message (English)',max:800},
   ...homeButtonSettings(),
@@ -50,6 +53,7 @@ export function validateSetting(key,input){
   if(field.internal && !field.internalText && (!/^-?\d+$/.test(value) || Math.abs(Number(value))>1000000000))return {ok:false,reason:'فرق العداد غير صالح.'};
   if(field.username && value && !/^@?[A-Za-z][A-Za-z0-9_]{4,31}$/.test(value))return {ok:false,reason:'اكتب اسم مستخدم تيليجرام صحيحاً مثل @MyAccount (بدون رابط).'};
   if(field.customEmoji && value && !/^\d{10,30}$/.test(value))return {ok:false,reason:'أرسل custom_emoji_id الصحيح أو أرسل رسالة تتضمن الرمز المتحرك، أو /empty للمسح.'};
+  if(key==='referral_welcome_bonus_iqd' && (!/^\d+$/.test(value) || Number(value)>1000000))return {ok:false,reason:'قيمة الهدية بين 0 و1,000,000.'};
   if(field.rate && (!/^\d+$/.test(value) || Number(value)<100 || Number(value)>10000))return {ok:false,reason:'أدخل سعراً صحيحاً بين 100 و10,000 دينار لكل دولار واحد.'};
   if(field.toggle && !['true','false'].includes(value))return {ok:false,reason:'اختر تفعيل أو تعطيل من لوحة الإدارة.'};
   if(field.required && !value)return {ok:false,reason:'لا يمكن ترك هذا الحقل فارغاً.'};
