@@ -47,3 +47,24 @@ BEGIN
  VALUES(NEW.referrer_tg_id,NEW.reward_iqd,'adjustment',
   'referral_reward:'||NEW.purchase_id,'مكافأة إحالة لشراء #'||NEW.purchase_id);
 END;
+
+-- The optional welcome reward is 0 (disabled) unless the owner activates it.
+-- Only the first rewarded purchase of each invited buyer qualifies.
+CREATE TRIGGER referral_welcome_bonus AFTER INSERT ON referral_rewards
+WHEN CAST(COALESCE((SELECT value FROM bot_settings WHERE key='referral_welcome_bonus_iqd'),'0') AS INTEGER)>0
+BEGIN
+ INSERT OR IGNORE INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key,note)
+ VALUES(NEW.buyer_tg_id,
+   MIN(NEW.purchase_iqd,CAST((SELECT value FROM bot_settings WHERE key='referral_welcome_bonus_iqd') AS INTEGER)),
+   'adjustment','referral_welcome:'||NEW.buyer_tg_id,
+   'هدية إحالة لأول شراء #'||NEW.purchase_id);
+END;
+CREATE TRIGGER referral_reward_notification AFTER INSERT ON referral_rewards
+BEGIN
+ INSERT INTO notification_outbox(method,payload)
+ SELECT 'sendMessage',json_object('chat_id',NEW.referrer_tg_id,'text',
+   (CASE WHEN u.language='en' THEN COALESCE(NULLIF((SELECT value FROM bot_settings WHERE key='referral_notice_en'),''),
+   '🎁 Referral reward added to your wallet') ELSE COALESCE(NULLIF((SELECT value FROM bot_settings WHERE key='referral_notice_ar'),''),
+   '🎁 تمت إضافة مكافأة الإحالة إلى محفظتك') END)||': '||NEW.reward_iqd||' IQD • #'||NEW.purchase_id)
+ FROM users u WHERE u.tg_id=NEW.referrer_tg_id;
+END;
