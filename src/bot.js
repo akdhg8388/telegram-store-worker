@@ -146,7 +146,7 @@ async function handleMessage(db,env,ctx,message){
     await clearSession(db,uid);
     const ref=text.match(/^\/start(?:@\w+)?\s+ref_(\d+)$/)?.[1];
     if(ref && ref!==String(uid)) {
-      await db.prepare('INSERT OR IGNORE INTO referrals(user_tg_id,referrer_tg_id) SELECT ?,tg_id FROM users WHERE tg_id=?').bind(uid,ref).run();
+      await db.prepare('INSERT OR IGNORE INTO referrals(user_tg_id,referrer_tg_id) SELECT ?,tg_id FROM users WHERE tg_id=? AND NOT EXISTS (SELECT 1 FROM wallet_purchases WHERE user_tg_id=?)').bind(uid,ref,uid).run();
     }
     return ui.home(db,env,uid);
   }
