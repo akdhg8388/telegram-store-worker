@@ -93,12 +93,14 @@ test('V9 custom emoji ID is extracted from actual Telegram entity, with UTF16 of
  })}finally{conn.close()}
 });
 
-test('V9 orders links to customer private inbox and shows preserved messages, images, videos with Baghdad timestamps',async()=>{
+test('V17 Home links to customer private inbox and shows preserved messages, images, videos with Baghdad timestamps',async()=>{
  const {conn,db}=fixture();try{await mockTelegram(async calls=>{
    conn.prepare("INSERT INTO support_messages(user_tg_id,direction,kind,body,telegram_file_id,customer_message_id) VALUES(101,'incoming','text','مرحبا',NULL,1000),(101,'incoming','photo','صورة','FILE-IMG',1001),(101,'outgoing','video','رد فيديو','FILE-VID',1002),(102,'incoming','text','خاص',NULL,1003)").run();
    await orders(db,environment,101);
    const markup=calls.at(-1).body.reply_markup.inline_keyboard.flat();
-   assert.ok(markup.some(x=>x.callback_data==='my_support_inbox'));
+   assert.ok(!markup.some(x=>x.callback_data==='my_support_inbox'));
+   await home(db,environment,101);
+   assert.ok(calls.at(-1).body.reply_markup.inline_keyboard.flat().some(x=>x.callback_data==='my_support_inbox'));
    await customerThread(db,environment,101,0);
    const txt=texts(calls).at(-1);
    assert.match(txt,/مرحبا/);
