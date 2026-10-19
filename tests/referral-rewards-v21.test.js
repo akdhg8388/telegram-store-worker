@@ -113,3 +113,52 @@ test('V21 changing settings does not retroactively issue referral rewards',()=>{
   assert.equal(rewards(c).length,1);
  }finally{c.close();}
 });
+
+
+test('V23 News home button opens the configured channel directly without another callback',async()=>{
+ const {c,db}=fixture();try{await mock(async calls=>{
+   c.prepare("INSERT INTO bot_settings(key,value) VALUES('news_url','https://t.me/MyStoreNewsIQ')").run();
+   await home(db,env,101);
+   let items=calls.at(-1).body.reply_markup.inline_keyboard.flat();
+   let news=items.find(x=>x.url==='https://t.me/MyStoreNewsIQ');
+   assert.ok(news,'news must be a Telegram URL button');
+   assert.equal(news.callback_data,undefined);
+   c.prepare("INSERT INTO bot_settings(key,value) VALUES('home_button_news_label_en','📰 Latest News')").run();
+   await home(db,{...env,__locale:'en'},101);
+   items=calls.at(-1).body.reply_markup.inline_keyboard.flat();
+   news=items.find(x=>x.url==='https://t.me/MyStoreNewsIQ');
+   assert.equal(news.text,'📰 Latest News');
+   c.prepare("INSERT INTO bot_settings(key,value) VALUES('home_button_news_visible','false')").run();
+   await home(db,env,101);
+   items=calls.at(-1).body.reply_markup.inline_keyboard.flat();
+   assert.ok(!items.some(x=>x.url==='https://t.me/MyStoreNewsIQ'||x.callback_data==='news'));
+   c.prepare("UPDATE bot_settings SET value='true' WHERE key='home_button_news_visible'").run();
+   c.prepare("UPDATE bot_settings SET value='' WHERE key='news_url'").run();
+   await home(db,env,101);
+   items=calls.at(-1).body.reply_markup.inline_keyboard.flat();
+   assert.ok(items.some(x=>x.callback_data==='news'), 'missing news link retains old helpful message');
+   assert.ok(!items.some(x=>x.url==='https://t.me/MyStoreNewsIQ'));
+ });}finally{c.close();}
+});
+test('V23 referral URL button shares the personal referral link via Telegram, in both languages',async()=>{
+ const {c,db}=fixture();try{await mock(async calls=>{
+   await referralPage(db,env,102);
+   let keyboard=calls.at(-1).body.reply_markup.inline_keyboard.flat();
+   let share=keyboard.find(x=>x.url?.startsWith('https://t.me/share/url?'));
+   assert.ok(share);
+   assert.equal(share.text,'🔗 مشاركة رابط الإحالة');
+   assert.equal(share.callback_data,undefined);
+   const url=new URL(share.url);
+   assert.equal(url.searchParams.get('url'),'https://t.me/MyStoreIQBot?start=ref_102');
+   assert.match(url.searchParams.get('text'),/My Store/);
+   assert.ok(keyboard.some(x=>x.callback_data==='referral_history'));
+   await referralPage(db,{...env,__locale:'en'},102);
+   keyboard=calls.at(-1).body.reply_markup.inline_keyboard.flat();
+   share=keyboard.find(x=>x.url?.startsWith('https://t.me/share/url?'));
+   assert.equal(share.text,'🔗 Share Referral Link');
+   assert.equal(new URL(share.url).searchParams.get('url'),'https://t.me/MyStoreIQBot?start=ref_102');
+   await referralPage(db,{...env,BOT_USERNAME:''},102);
+   keyboard=calls.at(-1).body.reply_markup.inline_keyboard.flat();
+   assert.ok(!keyboard.some(x=>x.url?.startsWith('https://t.me/share/url?')),'no fake share link without username');
+ });}finally{c.close();}
+});

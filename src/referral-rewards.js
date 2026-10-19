@@ -1,4 +1,4 @@
-import {button,keyboard,backRow,isAdmin,formatIQD} from './common.js';
+import {button,urlButton,keyboard,backRow,isAdmin,formatIQD} from './common.js';
 import {sendText,sendOrEditText} from './telegram.js';
 import {setSession,clearSession,audit,getUser} from './database.js';
 import {choice,languageOf} from './i18n.js';
@@ -22,7 +22,11 @@ export async function referralPage(db,env,uid,messageId=null){
  choice(env,'🔢 عدد مشتريات الصديق المؤهلة: ','🔢 Eligible purchases per friend: ')+cap,
  choice(env,'💰 إجمالي المكافآت: ','💰 Total rewards: ')+money,
  choice(env,'📜 مكافآت مستلمة: ','📜 Rewards earned: ')+(total?.n||0)];
+ const shareUrl=link.startsWith('https://t.me/')?
+   'https://t.me/share/url?url='+encodeURIComponent(link)+
+   '&text='+encodeURIComponent(choice(env,'🛍️ تعال إلى My Store من رابط دعوتي','🛍️ Join My Store with my invite link')):null;
  return sendOrEditText(env,uid,lines.join('\n'),keyboard(
+ ...(shareUrl?[[urlButton(choice(env,'🔗 مشاركة رابط الإحالة','🔗 Share Referral Link'),shareUrl,'primary')]]:[]),
  [button(choice(env,'📜 سجل الأرباح','📜 Earnings History'),'referral_history','primary')],backRow()),messageId,{preserveText:true});
 }
 export async function referralHistory(db,env,uid,messageId=null){

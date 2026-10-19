@@ -33,7 +33,13 @@ export async function home(db,env,uid,messageId=null) {
   rows.push([homeButton('orders'),homeButton('transactions')]);
   rows.push([homeButton('messages','primary')]); // Telegram accent/blue varies by theme.
   rows.push([homeButton('referrals'),homeButton('language')]);
-  rows.push([homeButton('support'),homeButton('news')]);
+  // Reuse the existing bulk settings query (no additional D1 call).
+  // A configured channel is a native Telegram URL button: one tap opens it,
+  // without a news callback round trip or a second tap on a text link.
+  const newsUrl=String(Object.hasOwn(visual,'news_url')?visual.news_url:(env.NEWS_URL||'')).trim();
+  const directNews=isHomeButtonVisible(visual,'news') && /^https:\/\/[^\s]+$/i.test(newsUrl)
+    ?homeUrlButton(visual,'news',newsUrl,lang):homeButton('news');
+  rows.push([homeButton('support'),directNews]);
   if(isAdmin(env,uid))rows.push([homeButton('admin')]);
   if(env.RESELLER_URL?.startsWith('https://')&&isHomeButtonVisible(visual,'reseller'))rows.push([homeUrlButton(visual,'reseller',env.RESELLER_URL,lang)]);
   const adjustment=/^-?\d+$/.test(visual.users_display_adjustment||'0') ? Number(visual.users_display_adjustment||0):0;
