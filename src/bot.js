@@ -14,6 +14,7 @@ import {handleUserCallback,handleUserText} from './admin-users.js';
 import {beginPurchase,commitPurchase,showReceipt,purchaseList} from './wallet-purchase.js';
 import {readPurchaseViewIds,cleanupPurchaseViews} from './purchase-views.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
+import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}) {
   for(const admin of adminIds(env)) {
@@ -153,16 +154,12 @@ async function handleMessage(db,env,ctx,message){
   const uid=message.from?.id;
   if(!uid || !message.chat || message.chat.type!=='private') return;
   await ensureUser(db,message.from);
-  const [denied,underMaintenance]=await Promise.all([
-    guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve(false):maintenanceActive(db)
-  ]);
+  const cmd=String(message.text||'').trim().split(/\s+/)[0];
+  const [denied,maint]=await Promise.all([guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve({global:false,button:false}):maintenanceStatus(db,maintenanceCommandId(cmd))]);
   if(denied)return sendText(env,uid,denied);
   const text=String(message.text??'').trim();
-  if(underMaintenance){
-    const en=env.__locale==='en';
-    const msg=await getSetting(db,en?'maintenance_message_en':'maintenance_message_ar',en?'🛠️ My Store is temporarily under maintenance. Please try again later.':'🛠️ المتجر تحت الصيانة مؤقتاً. يرجى المحاولة لاحقاً.');
-    return sendText(env,uid,msg|| (en?'🛠️ Temporarily under maintenance.':'🛠️ المتجر تحت الصيانة مؤقتاً.'));
-  }
+  if(maint.global)return sendMaintenanceNotice(db,env,uid);
+  if(maint.button)return sendMaintenanceNotice(db,env,uid,maintenanceCommandId(cmd));
   if(!isAdmin(env,uid)){
     const gate=await gateState(db,env,uid);
     if(!gate.allowed)return showGate(db,env,uid,gate);
@@ -211,6 +208,7 @@ async function handleMessage(db,env,ctx,message){
   }
   const session=await getSession(db,uid);
   if(session){
+    if(session.action.startsWith('owner_') && await maintenanceAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await referralAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleChannelAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleUserText(db,env,uid,session,message))return;
@@ -427,16 +425,10 @@ async function handleCallback(db,env,ctx,q){
   // Answer the callback in parallel with database work for a responsive interface.
   ctx.waitUntil(answerCallback(env,q.id).catch(e=>console.error('callback acknowledgement',String(e))));
   await ensureUser(db,q.from);
-  const [denied,underMaintenance]=await Promise.all([
-    guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve(false):maintenanceActive(db)
-  ]);
-  if(denied)return sendText(env,uid,denied);
   const data=String(q.data||'');
-  if(underMaintenance){
-    const en=env.__locale==='en';
-    const msg=await getSetting(db,en?'maintenance_message_en':'maintenance_message_ar',en?'🛠️ My Store is temporarily under maintenance. Please try again later.':'🛠️ المتجر تحت الصيانة مؤقتاً. يرجى المحاولة لاحقاً.');
-    return sendText(env,uid,msg||(en?'🛠️ Temporarily under maintenance.':'🛠️ المتجر تحت الصيانة مؤقتاً.'));
-  }
+  const [denied,maint]=await Promise.all([guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve({global:false,button:false}):maintenanceStatus(db,maintenanceActionId(data))]);
+  if(denied)return sendText(env,uid,denied);
+  if(maint.global)return sendMaintenanceNotice(db,env,uid);
   if(data==='required_verify'){
     const gate=await gateState(db,env,uid);
     if(!gate.allowed)return showGate(db,env,uid,gate,q.message?.message_id);
@@ -447,6 +439,8 @@ async function handleCallback(db,env,ctx,q){
     const gate=await gateState(db,env,uid);
     if(!gate.allowed)return showGate(db,env,uid,gate,q.message?.message_id);
   }
+  if(maint.button)return sendMaintenanceNotice(db,env,uid,maintenanceActionId(data));
+  if(await maintenanceAdminCallback(db,env,uid,data,q.message?.message_id))return;
   if(await referralAdminCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleChannelAdmin(db,env,uid,data,q.message?.message_id))return;
   if(await handleCustomerSupportCallback(db,env,uid,data,q.message?.message_id))return;
