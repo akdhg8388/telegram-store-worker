@@ -32,6 +32,7 @@ export function homeButtonSettings(){
     result[homeSettingKey(x.id,'label_ar')]={label:`✏️ اسم زر ${x.ar} بالعربي`,max:52};
     result[homeSettingKey(x.id,'label_en')]={label:`✏️ English label for ${x.en}`,max:52};
     result[homeSettingKey(x.id,'icon')]={label:`✨ رمز زر ${x.ar}`,max:30,customEmoji:true};
+    result[homeSettingKey(x.id,'color')]={label:`🌈 لون زر ${x.ar}`,max:8};
     result[homeSettingKey(x.id,'visible')]={label:`👁️ إظهار زر ${x.ar}`,max:5,toggle:true};
     // Internal Unicode fallbacks preserve the glyph's exact position in edited names.
     result[homeSettingKey(x.id,'inline_ar')]={label:'Internal emoji fallback (Arabic)',max:16,internal:true,internalText:true};
@@ -74,15 +75,25 @@ export function applyHomeButtonVisual(buttonObject,visual){
   }
   return buttonObject;
 }
+export function homeButtonColor(settings,id,fallback='primary'){
+ const value=settings[homeSettingKey(id,'color')];
+ return ['primary','success','danger'].includes(value)?value:value==='default'?null:fallback;
+}
 export function homeActionButton(settings,id,lang='ar',style='primary'){
   const def=HOME_BUTTONS.find(x=>x.id===id);
   if(!def)return null;
   const visual=resolvedHomeButton(settings,id,lang);
-  return applyHomeButtonVisual(button(visual.text,def.action,style),visual);
+  const color=homeButtonColor(settings,id,style);
+ const item=button(visual.text,def.action,color||undefined);
+ if(!color)delete item.style;
+ return applyHomeButtonVisual(item,visual);
 }
 export function homeUrlButton(settings,id,url,lang='ar'){
   const visual=resolvedHomeButton(settings,id,lang);
-  return applyHomeButtonVisual(urlButton(visual.text,url),visual);
+  const color=homeButtonColor(settings,id);
+ const item=urlButton(visual.text,url,color||undefined);
+ if(!color)delete item.style;
+ return applyHomeButtonVisual(item,visual);
 }
 export function withButtonIcon(item,id){
   const icon=emojiId(id);
