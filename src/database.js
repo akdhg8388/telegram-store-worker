@@ -30,5 +30,5 @@ export async function listProducts(db, page=0, categoryId=null, search=null) {
 }
 export async function getProduct(db,id) {return db.prepare('SELECT * FROM products WHERE id=? AND active=1').bind(id).first()}
 export async function listOrders(db,uid){return (await db.prepare(`SELECT o.*,p.title FROM orders o JOIN products p ON o.product_id=p.id WHERE o.user_tg_id=? AND (o.status NOT IN ('delivered','cancelled','rejected') OR o.created_at>=datetime('now','-30 days')) ORDER BY o.id DESC LIMIT 12`).bind(uid).all()).results??[]}
-export async function ledger(db,uid){return (await db.prepare('SELECT * FROM wallet_ledger WHERE user_tg_id=? AND created_at>=datetime('now','-30 days') ORDER BY id DESC LIMIT 15').bind(uid).all()).results??[]}
+export async function ledger(db,uid){return (await db.prepare(`SELECT * FROM wallet_ledger WHERE user_tg_id=? AND created_at>=datetime('now','-30 days') ORDER BY id DESC LIMIT 15`).bind(uid).all()).results??[]}
 export async function audit(db,admin,action,type,id){await db.prepare('INSERT INTO admin_actions(admin_tg_id,action,target_type,target_id) VALUES (?,?,?,?)').bind(admin,action,type,id).run()}
