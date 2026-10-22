@@ -422,8 +422,6 @@ async function refundOrder(db,env,uid,id){
 async function handleCallback(db,env,ctx,q){
   const uid=q.from?.id;
   if(!uid || (q.message && q.message.chat?.type!=='private'))return;
-  // Answer the callback in parallel with database work for a responsive interface.
-  ctx.waitUntil(answerCallback(env,q.id).catch(e=>console.error('callback acknowledgement',String(e))));
   await ensureUser(db,q.from);
   const data=String(q.data||'');
   const [denied,maint]=await Promise.all([guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve({global:false,button:false}):maintenanceStatus(db,maintenanceActionId(data))]);
@@ -671,16 +669,22 @@ async function handlePayment(db,env,ctx,message){
   return sendText(env,uid,`✅ تم الدفع بنجاح للطلب #${id}.\n\n${formatStars(o.total_stars)}\nطلبك الآن قيد التجهيز، وسيصلك إشعار عند التسليم.`,keyboard([button('📦 طلباتي','orders')],backRow()));
 }
 export async function processUpdate(db,env,ctx,update){
-  if(update.update_id!==undefined){
-    const done=await db.prepare('SELECT 1 AS yes FROM processed_updates WHERE update_id=?').bind(update.update_id).first();
-    if(done)return;
+  // Acknowledge callbacks immediately, independent of D1 latency.
+  if(update.callback_query?.id){
+    ctx.waitUntil(answerCallback(env,update.callback_query.id).catch(e=>console.error('callback acknowledgement',String(e))));
   }
-  // Per-update locale, never mutate the shared Cloudflare environment.
   const incomingId=update.callback_query?.from?.id||update.message?.from?.id||update.pre_checkout_query?.from?.id;
+  // Two independent read-only lookups in parallel. Preserve idempotency
+  // checks before all user-facing business actions.
+  const [done,locale]=await Promise.all([
+    update.update_id===undefined?Promise.resolve(null):db.prepare('SELECT 1 AS yes FROM processed_updates WHERE update_id=?').bind(update.update_id).first(),
+    userLanguage(db,incomingId)
+  ]);
+  if(done)return;
   // Media-message callbacks cannot be edited using editMessageText. Carry the
   // source type only for this update to avoid a failing Telegram API round trip.
   const source=update.callback_query?.message;
-  env={...env,__locale:await userLanguage(db,incomingId),
+  env={...env,__locale:locale,
     __callback_message_id:source?.message_id??null,
     __callback_media:!!(source?.photo?.length||source?.video||source?.animation||source?.document)};
   if(update.pre_checkout_query) await telegram(env,'answerPreCheckoutQuery',{pre_checkout_query_id:update.pre_checkout_query.id,ok:false,error_message:'تم إيقاف نظام النجوم للطلبات الجديدة. تواصل مع الدعم بشأن الطلبات السابقة.'});
