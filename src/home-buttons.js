@@ -45,7 +45,7 @@ export function homeButtonSettings(){
 export function isHomeButtonVisible(settings,id){return settings[homeSettingKey(id,'visible')]!=='false';}
 export function emojiId(value){return VALID_EMOJI.test(String(value||''))?String(value):null;}
 export async function loadVisualSettings(db){
-  const rows=await db.prepare(`SELECT key,value FROM bot_settings WHERE key LIKE 'home_button_%' OR key LIKE '%_custom_emoji_id' OR key IN ('store_name','home_template','home_template_en','storefront_instructions','users_display_adjustment','purchase_instructions','usd_rate_iqd','news_url')`).all();
+  const rows=await db.prepare(`SELECT key,value FROM bot_settings WHERE key LIKE 'home_button_%' OR key LIKE '%_custom_emoji_id' OR key LIKE 'maintenance_button_%_enabled' OR key IN ('store_name','home_template','home_template_en','storefront_instructions','users_display_adjustment','purchase_instructions','usd_rate_iqd','news_url')`).all();
   return Object.fromEntries((rows.results||[]).map(row=>[row.key,row.value]));
 }
 export function resolvedHomeButton(settings,id,lang='ar'){
