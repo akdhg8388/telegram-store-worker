@@ -26,7 +26,7 @@ async function isStaticCustomEmoji(env,id){
 
 
 export function adminRoute(data){
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -57,6 +57,7 @@ async function homeButtonDetail(db,env,uid,key,messageId=null){
     [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
     [button('✏️ Edit English label',`admin_setting_edit:${homeSettingKey(key,'label_en')}`)],
     [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
+    [button('🌈 تغيير لون الزر',`admin_home_button_color:${key}:primary`,'primary')],
     ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)],[button('📝 Edit English Description',`admin_setting_edit:${homeSettingKey(key,'description_en')}`)]]:[]),
     [button(visible?'🙈 إخفاء هذا الزر':'👁️ إظهار هذا الزر',`admin_home_button_toggle:${key}`,visible?'danger':'success')],
     [button('↩️ استعادة هذا الزر للأصل',`admin_home_button_reset:${key}`,'danger')],
@@ -342,11 +343,25 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await audit(db,uid,'toggle_home_button','ui',0);
     await homeButtonDetail(db,env,uid,key,messageId);
   }
+  else if(data.startsWith('admin_home_button_color:')){
+    const parts=data.split(':'),id=parts[1],selected=parts[2];
+    if(!HOME_BUTTONS.some(x=>x.id===id))return true;
+    if(['default','primary','success','danger'].includes(selected)){
+      await updateSetting(db,homeSettingKey(id,'color'),selected,uid);
+      await audit(db,uid,'set_button_color','ui',0);
+    }
+    return sendOrEditText(env,uid,'🌈 لون زر '+HOME_BUTTONS.find(x=>x.id===id).ar+'\n\nاختر اللون. الافتراضي يترك Telegram يختار اللون حسب ثيم المستخدم.',keyboard(
+      [button('🔵 أزرق',`admin_home_button_color:${id}:primary`,'primary')],
+      [button('🟢 أخضر',`admin_home_button_color:${id}:success`,'success')],
+      [button('🔴 أحمر',`admin_home_button_color:${id}:danger`,'danger')],
+      [button('⚪ لون Telegram الافتراضي',`admin_home_button_color:${id}:default`)],
+      [button('↩️ إعداد الزر',`admin_home_button:${id}`)],adminBack),messageId);
+  }
   else if(data==='admin_product_icons')await productIconsMenu(db,env,uid,messageId);
   else if(data.startsWith('admin_home_button_reset:')){
     const key=data.split(':')[1];
     if(!HOME_BUTTONS.some(b=>b.id===key))return true;
-    await Promise.all(['label_ar','label_en','icon','inline_ar','inline_en','visible',...(key==='messages'?['description_ar','description_en']:[])].map(field=>updateSetting(db,homeSettingKey(key,field),field==='visible'?'true':'',uid)));
+    await Promise.all(['label_ar','label_en','icon','inline_ar','inline_en','visible','color',...(key==='messages'?['description_ar','description_en']:[])].map(field=>updateSetting(db,homeSettingKey(key,field),field==='visible'?'true':'',uid)));
     await audit(db,uid,'reset_home_button','ui',0);
     await homeButtonDetail(db,env,uid,key,messageId);
   }
@@ -359,7 +374,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data==='admin_home_reset_all_confirm'){
     const session=await getSession(db,uid);
     if(session?.action!=='owner_home_buttons_reset')return true;
-    for(const b of HOME_BUTTONS)for(const field of ['label_ar','label_en','icon','inline_ar','inline_en','visible',...(b.id==='messages'?['description_ar','description_en']:[])])
+    for(const b of HOME_BUTTONS)for(const field of ['label_ar','label_en','icon','inline_ar','inline_en','visible','color',...(b.id==='messages'?['description_ar','description_en']:[])])
       await updateSetting(db,homeSettingKey(b.id,field),field==='visible'?'true':'',uid);
     await clearSession(db,uid);
     await audit(db,uid,'reset_all_home_buttons','ui',0);
