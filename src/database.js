@@ -1,3 +1,11 @@
+// Avoid an unnecessary D1 write for every click. A user row is
+// synchronized only on first contact or when Telegram profile fields change.
+export function userProfileChanged(stored,incoming){
+  if(!incoming?.id)return false;
+  const firstName=String(incoming.first_name??'').slice(0,150);
+  const username=incoming.username?String(incoming.username).slice(0,120):null;
+  return !stored || stored.first_name!==firstName || (stored.username??null)!==username;
+}
 export async function ensureUser(db, u) {
   if(!u?.id) return;
   await db.prepare(`INSERT INTO users (tg_id,first_name,username) VALUES (?,?,?)
