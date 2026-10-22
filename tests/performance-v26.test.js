@@ -13,6 +13,6 @@ test('V26 guard uses known user without extra database call',async()=>{
  const db={prepare(){throw Error('unexpected D1 query')}};
  const env={ADMIN_ID:'991'};
  assert.equal(await guardUser(db,env,101,{is_blocked:0,suspended_until:null}),null);
- assert.match(await guardUser(db,env,101,{is_blocked:1,restriction_reason:''}),/محظور/);
+ assert.match(await guardUser(db,env,101,{is_blocked:1,restriction_reason:''}),/تم إيقاف وصولك/);
  assert.equal(await guardUser(db,env,991,null),null);
 });
