@@ -9,6 +9,7 @@ import {languageOf,choice,translateUi} from './i18n.js';
 import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage,validRate} from './wallet.js';
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 import {sendPhotoCard,cardEntities} from './product-card.js';
+import {isMaintenanceButtonEnabled} from './maintenance.js';
 
 export async function home(db,env,uid,messageId=null) {
   const lang=languageOf(env);
@@ -37,7 +38,7 @@ export async function home(db,env,uid,messageId=null) {
   // A configured channel is a native Telegram URL button: one tap opens it,
   // without a news callback round trip or a second tap on a text link.
   const newsUrl=String(Object.hasOwn(visual,'news_url')?visual.news_url:(env.NEWS_URL||'')).trim();
-  const directNews=isHomeButtonVisible(visual,'news') && /^https:\/\/[^\s]+$/i.test(newsUrl)
+  const directNews=isHomeButtonVisible(visual,'news') && !isMaintenanceButtonEnabled(visual,'news') && /^https:\/\/[^\s]+$/i.test(newsUrl)
     ?homeUrlButton(visual,'news',newsUrl,lang):homeButton('news');
   rows.push([homeButton('support'),directNews]);
   if(isAdmin(env,uid))rows.push([homeButton('admin')]);
