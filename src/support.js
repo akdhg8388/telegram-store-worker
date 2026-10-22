@@ -154,8 +154,8 @@ export async function handleSupportReply(db,env,uid,session,message){
 // Customer view. Every query uses the authenticated Telegram user ID; a user
 // can never request or enumerate a different customer's support conversation.
 export async function customerInbox(db,env,uid,messageId=null){
-  const count=await db.prepare('SELECT COUNT(*) n FROM support_messages WHERE user_tg_id=? AND created_at>=datetime('now','-30 days')').bind(uid).first();
-  const latest=await db.prepare('SELECT kind,direction,created_at FROM support_messages WHERE user_tg_id=? AND created_at>=datetime('now','-30 days') ORDER BY id DESC LIMIT 1').bind(uid).first();
+  const count=await db.prepare(`SELECT COUNT(*) n FROM support_messages WHERE user_tg_id=? AND created_at>=datetime('now','-30 days')`).bind(uid).first();
+  const latest=await db.prepare(`SELECT kind,direction,created_at FROM support_messages WHERE user_tg_id=? AND created_at>=datetime('now','-30 days') ORDER BY id DESC LIMIT 1`).bind(uid).first();
   const en=languageOf(env)==='en';
   const defaultDescription=choice(env,'يمكنك مراجعة رسائلك وردود الإدارة والصور والفيديوهات وتاريخ كل رسالة.','Review your messages, support replies, photos, videos and message dates.');
   const description=await getSetting(db,homeSettingKey('messages',en?'description_en':'description_ar'),'');
@@ -169,7 +169,7 @@ export async function customerInbox(db,env,uid,messageId=null){
 }
 export async function customerThread(db,env,uid,page=0,messageId=null){
   const offset=Math.max(0,Math.min(page,200))*8;
-  const messages=(await db.prepare('SELECT * FROM support_messages WHERE user_tg_id=? AND created_at>=datetime('now','-30 days') ORDER BY id DESC LIMIT 9 OFFSET ?').bind(uid,offset).all()).results??[];
+  const messages=(await db.prepare(`SELECT * FROM support_messages WHERE user_tg_id=? AND created_at>=datetime('now','-30 days') ORDER BY id DESC LIMIT 9 OFFSET ?`).bind(uid,offset).all()).results??[];
   const segment=messages.slice(0,8);
   // Reverse just this page to read top-to-bottom chronologically.
   const text=segment.slice().reverse().map(m=>`${m.direction==='incoming'?'👤 أنت':'🎧 فريق الدعم'} • ${baghdadDate(m.created_at)}\n${preview(m)}`).join('\n\n');
@@ -178,7 +178,7 @@ export async function customerThread(db,env,uid,page=0,messageId=null){
   if(page>0)nav.push(button('⬅️ أحدث',`my_support_thread:${page-1}`,'primary'));
   if(messages.length>8)nav.push(button('أقدم ➡️',`my_support_thread:${page+1}`,'primary'));
   if(nav.length)rows.push(nav);
-  const hasConversation=await db.prepare('SELECT 1 AS found FROM support_messages WHERE user_tg_id=? AND created_at>=datetime('now','-30 days') LIMIT 1').bind(uid).first();
+  const hasConversation=await db.prepare(`SELECT 1 AS found FROM support_messages WHERE user_tg_id=? AND created_at>=datetime('now','-30 days') LIMIT 1`).bind(uid).first();
   if(hasConversation)rows.push([button(choice(env,'↩️ الرد على المحادثة','↩️ Reply to Conversation'),'my_support_reply','success')]);
   rows.push([button('↩️ رجوع لرسائلي','my_support_inbox','danger')]);
   return sendOrEditText(env,uid,`📨 سجل رسائلي • صفحة ${page+1}\n\n${text||'لا توجد مراسلات بعد.'}`,keyboard(...rows),messageId);
