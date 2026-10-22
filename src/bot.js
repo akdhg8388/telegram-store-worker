@@ -2,7 +2,7 @@ import {CUSTOMER_COMMANDS,OWNER_COMMANDS,CUSTOMER_COMMANDS_EN,OWNER_COMMANDS_EN}
 import {userLanguage,choice} from './i18n.js';
 import {button,keyboard,backRow,adminIds,isAdmin,positiveInt,short,formatStars,formatIQD,moneyMethods,orderNames} from './common.js';
 import {telegram,sendText,sendOrEditText,answerCallback,queueNotification,flushOutbox} from './telegram.js';
-import {ensureUser,getUser,setSession,getSession,clearSession,getProduct,audit} from './database.js';
+import {ensureUser,userProfileChanged,getUser,setSession,getSession,clearSession,getProduct,audit} from './database.js';
 import * as ui from './ui.js';
 import {referralPage,referralHistory,referralAdminCallback,referralAdminText} from './referral-rewards.js';
 import {handleAdminCallback,handleAdminText} from './admin-controls.js';
@@ -153,9 +153,9 @@ async function handleTextState(db,env,ctx,uid,message,session) {
 async function handleMessage(db,env,ctx,message){
   const uid=message.from?.id;
   if(!uid || !message.chat || message.chat.type!=='private') return;
-  await ensureUser(db,message.from);
+  if(userProfileChanged(env.__knownUser,message.from))await ensureUser(db,message.from);
   const cmd=String(message.text||'').trim().split(/\s+/)[0];
-  const [denied,maint]=await Promise.all([guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve({global:false,button:false}):maintenanceStatus(db,maintenanceCommandId(cmd))]);
+  const [denied,maint]=await Promise.all([guardUser(db,env,uid,env.__knownUser),isAdmin(env,uid)?Promise.resolve({global:false,button:false}):maintenanceStatus(db,maintenanceCommandId(cmd))]);
   if(denied)return sendText(env,uid,denied);
   const text=String(message.text??'').trim();
   if(maint.global)return sendMaintenanceNotice(db,env,uid);
@@ -422,7 +422,7 @@ async function refundOrder(db,env,uid,id){
 async function handleCallback(db,env,ctx,q){
   const uid=q.from?.id;
   if(!uid || (q.message && q.message.chat?.type!=='private'))return;
-  await ensureUser(db,q.from);
+  if(userProfileChanged(env.__knownUser,q.from))await ensureUser(db,q.from);
   const data=String(q.data||'');
   const [denied,maint]=await Promise.all([guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve({global:false,button:false}):maintenanceStatus(db,maintenanceActionId(data))]);
   if(denied)return sendText(env,uid,denied);
@@ -676,15 +676,16 @@ export async function processUpdate(db,env,ctx,update){
   const incomingId=update.callback_query?.from?.id||update.message?.from?.id||update.pre_checkout_query?.from?.id;
   // Two independent read-only lookups in parallel. Preserve idempotency
   // checks before all user-facing business actions.
-  const [done,locale]=await Promise.all([
+  const [done,knownUser]=await Promise.all([
     update.update_id===undefined?Promise.resolve(null):db.prepare('SELECT 1 AS yes FROM processed_updates WHERE update_id=?').bind(update.update_id).first(),
-    userLanguage(db,incomingId)
+    incomingId?getUser(db,incomingId):Promise.resolve(null)
   ]);
   if(done)return;
+  const locale=knownUser?.language==='en'?'en':'ar';
   // Media-message callbacks cannot be edited using editMessageText. Carry the
   // source type only for this update to avoid a failing Telegram API round trip.
   const source=update.callback_query?.message;
-  env={...env,__locale:locale,
+  env={...env,__knownUser:knownUser,__locale:locale,
     __callback_message_id:source?.message_id??null,
     __callback_media:!!(source?.photo?.length||source?.video||source?.animation||source?.document)};
   if(update.pre_checkout_query) await telegram(env,'answerPreCheckoutQuery',{pre_checkout_query_id:update.pre_checkout_query.id,ok:false,error_message:'تم إيقاف نظام النجوم للطلبات الجديدة. تواصل مع الدعم بشأن الطلبات السابقة.'});

@@ -12,9 +12,9 @@ export function restrictionLabel(user,now=Math.floor(Date.now()/1000)){
   if(Number(user?.suspended_until)>now)return '⏳ معلّق حتى '+baghdadDate(new Date(user.suspended_until*1000).toISOString());
   return '✅ نشط';
 }
-export async function guardUser(db,env,uid){
+export async function guardUser(db,env,uid,knownUser=undefined){
   if(String(uid)===String(env.ADMIN_ID))return null;
-  const user=await getUser(db,uid);
+  const user=knownUser===undefined?await getUser(db,uid):knownUser;
   if(!user)return null;
   if(user.is_blocked===1)return '🚫 تم إيقاف وصولك إلى My Store بشكل دائم.'+
     (user.restriction_reason?'\n📋 السبب: '+short(user.restriction_reason,220):'');
