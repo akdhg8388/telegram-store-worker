@@ -155,7 +155,7 @@ export async function showReceipt(db,env,uid,id){
 export async function purchaseList(db,env,uid,messageId=null){
   const {sendOrEditText}=await import('./telegram.js');
   const rows=(await db.prepare(`SELECT w.id,w.product_name,w.price_iqd,w.created_at,p.title_en FROM wallet_purchases w
-    LEFT JOIN products p ON p.id=w.product_id WHERE w.user_tg_id=? ORDER BY w.id DESC LIMIT 15`).bind(uid).all()).results??[];
+    LEFT JOIN products p ON p.id=w.product_id WHERE w.user_tg_id=? AND w.created_at>=datetime('now','-30 days') ORDER BY w.id DESC LIMIT 15`).bind(uid).all()).results??[];
   return sendOrEditText(env,uid,languageOf(env)==='en'
     ?(rows.length?'📦 My Wallet Purchases\n\nSelect a purchase to view its details, photo, and instructions.':'📦 My Purchases\n\nYou have not made any wallet purchases yet.')
     :(rows.length?'📦 مشترياتي من المحفظة\n\nاختر عملية لعرض تفاصيل المنتج والصورة وطريقة الاستخدام.':'📦 مشترياتي\n\nلم تشترِ منتجات من المحفظة بعد.'),keyboard(
