@@ -206,11 +206,11 @@ export async function orders(db,env,uid,messageId=null){
   const items=await listOrders(db,uid);
   const txt=items.length?items.map(o=>`#${o.id} | ${short(o.title,36)}\n${orderNames[o.status]||o.status} (طلب بالنظام السابق)`).join('\n\n'):'لا توجد طلبات بالنظام السابق.';
   const rows=[[button('📦 مشترياتي وتسليماتي','wallet_purchases','success')]];
-  const topups=(await db.prepare('SELECT id,method,amount_iqd,requested_currency,requested_amount_minor,status,created_at FROM topup_requests WHERE user_tg_id=? AND (status='pending' OR created_at>=datetime('now','-30 days')) ORDER BY id DESC LIMIT 10').bind(uid).all()).results??[];
+  const topups=(await db.prepare(`SELECT id,method,amount_iqd,requested_currency,requested_amount_minor,status,created_at FROM topup_requests WHERE user_tg_id=? AND (status='pending' OR created_at>=datetime('now','-30 days')) ORDER BY id DESC LIMIT 10`).bind(uid).all()).results??[];
   const topupText=topups.length?topups.map(t=>`#${t.id} • ${formatQuote({currency:t.requested_currency,requestedMinor:t.requested_amount_minor,amountIqd:t.amount_iqd})} • ${topupStatus(t.status)}`).join('\n'):'لا توجد طلبات شحن.';
   rows.push(...topups.slice(0,8).map(t=>[button(`💳 متابعة شحن #${t.id}`,`topup_status:${t.id}`,'primary')]));
    rows.push(backRow());
-  const totalWallet=(await db.prepare('SELECT COUNT(*) AS n FROM wallet_purchases WHERE user_tg_id=? AND created_at>=datetime('now','-30 days')').bind(uid).first())?.n||0;
+  const totalWallet=(await db.prepare(`SELECT COUNT(*) AS n FROM wallet_purchases WHERE user_tg_id=? AND created_at>=datetime('now','-30 days')`).bind(uid).first())?.n||0;
   const ordersText=`📦 طلباتي\n\n✅ مشتريات المحفظة المسلّمة: ${totalWallet}\nاضغط «مشترياتي وتسليماتي» لعرض المنتجات والصور وتعليمات الاستخدام.\n\n🛍️ الطلبات القديمة\n${txt}\n\n💳 طلبات شحن المحفظة\n${topupText}`;
   const decorated=await decoratedMessage(db,'orders',ordersText);
   return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
