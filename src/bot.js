@@ -669,19 +669,18 @@ async function handlePayment(db,env,ctx,message){
   return sendText(env,uid,`✅ تم الدفع بنجاح للطلب #${id}.\n\n${formatStars(o.total_stars)}\nطلبك الآن قيد التجهيز، وسيصلك إشعار عند التسليم.`,keyboard([button('📦 طلباتي','orders')],backRow()));
 }
 export async function processUpdate(db,env,ctx,update){
-  if(update.update_id!==undefined){
-    const done=await db.prepare('SELECT 1 AS yes FROM processed_updates WHERE update_id=?').bind(update.update_id).first();
-    if(done)return;
-  }
-  // Acknowledge button presses before database reads to remove the
-  // Telegram spinner from the critical-path of user and locale lookup.
-  // Keep callback processing and all business checks unchanged.
+  // Acknowledge callbacks immediately, independent of D1 latency.
   if(update.callback_query?.id){
     ctx.waitUntil(answerCallback(env,update.callback_query.id).catch(e=>console.error('callback acknowledgement',String(e))));
   }
-  // Locale and idempotency checks are independent D1 reads.
   const incomingId=update.callback_query?.from?.id||update.message?.from?.id||update.pre_checkout_query?.from?.id;
-  const locale=await userLanguage(db,incomingId);
+  // Two independent read-only lookups in parallel. Preserve idempotency
+  // checks before all user-facing business actions.
+  const [done,locale]=await Promise.all([
+    update.update_id===undefined?Promise.resolve(null):db.prepare('SELECT 1 AS yes FROM processed_updates WHERE update_id=?').bind(update.update_id).first(),
+    userLanguage(db,incomingId)
+  ]);
+  if(done)return;
   // Media-message callbacks cannot be edited using editMessageText. Carry the
   // source type only for this update to avoid a failing Telegram API round trip.
   const source=update.callback_query?.message;
