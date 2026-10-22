@@ -42,7 +42,7 @@ export async function home(db,env,uid,messageId=null) {
     ?homeUrlButton(visual,'news',newsUrl,lang):homeButton('news');
   rows.push([homeButton('support'),directNews]);
   if(isAdmin(env,uid))rows.push([homeButton('admin')]);
-  if(env.RESELLER_URL?.startsWith('https://')&&isHomeButtonVisible(visual,'reseller'))rows.push([homeUrlButton(visual,'reseller',env.RESELLER_URL,lang)]);
+  if(env.RESELLER_URL?.startsWith('https://')&&isHomeButtonVisible(visual,'reseller'))rows.push([isMaintenanceButtonEnabled(visual,'reseller')?homeButton('reseller'):homeUrlButton(visual,'reseller',env.RESELLER_URL,lang)]);
   const adjustment=/^-?\d+$/.test(visual.users_display_adjustment||'0') ? Number(visual.users_display_adjustment||0):0;
   const shownUsers=Math.max(0,Number(count?.n||0)+adjustment);
   const balance=Number(user?.wallet_balance_iqd||0);
