@@ -2,6 +2,7 @@ import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
 import {sendOrEditText} from './telegram.js';
+import {boldEntities} from './v25-format.js';
 import {getSetting,storeAcceptsOrders} from './settings.js';
 import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,renderHomeTemplate,decimalMoney,decoratedMessage,decoratedHome,decorateProductText} from './presentation.js';
 import {loadVisualSettings,homeActionButton,homeUrlButton,isHomeButtonVisible,withButtonIcon,emojiId} from './home-buttons.js';
@@ -251,7 +252,7 @@ export async function topupMethods(db,env,uid,quote,messageId=null){
 export async function topupEvidence(db,env,uid,quote,method,messageId=null){
   const receiver=await receiverFor(db,env,method);
   const instructions=await getSetting(db,'topup_instructions','');
-  return sendOrEditText(env,uid,`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`,keyboard([button('↩️ إلغاء الطلب','topup_cancel','danger')]),messageId);
+  return sendOrEditText(env,uid,`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`,keyboard([button('↩️ إلغاء الطلب','topup_cancel','danger')]),messageId,{entities:boldEntities(`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`),preserveText:true});
 }
 export async function topupConfirm(db,env,uid,payload,messageId=null){
   return sendOrEditText(env,uid,`📋 مراجعة طلب شحن المحفظة
