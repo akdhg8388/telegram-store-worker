@@ -3,6 +3,7 @@ import {sendText,sendOrEditText,telegram} from './telegram.js';
 import {updateBotProfilePicture} from './bot-profile.js';
 import {setSession,getSession,clearSession,audit,getUser} from './database.js';
 import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './settings.js';
+import {boldEntities} from './v25-format.js';
 import {usdRate,receiverFor} from './wallet.js';
 import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,preserveCustomEmojiInTemplate} from './presentation.js';
 import {home as customerHomePreview} from './ui.js';
@@ -97,7 +98,7 @@ async function settings(db,env,uid,page=0,messageId=null){
   return reply('⚙️ إدارة المتجر والرسائل\n\nاختر ما تريد تعديله. لا يمكن تعديل رمز البوت أو هوية المدير من داخل تيليجرام.',keyboard(...rows));
 }
 async function settingDetail(db,env,uid,key,messageId=null){
-  const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
+  const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId,/_receiver$/.test(key)?{entities:boldEntities(text),preserveText:true}:{});
   const def=SETTING_FIELDS[key];if(!def)return reply('الإعداد غير معروف.');
   const fallback=key==='home_template'?DEFAULT_HOME_TEMPLATE:key==='home_template_en'?DEFAULT_HOME_TEMPLATE_EN:key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':key==='manual_topups_enabled'?env.ENABLE_MANUAL_TOPUPS||'false':'';
   const value=await getSetting(db,key,fallback||'');
