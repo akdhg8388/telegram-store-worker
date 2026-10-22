@@ -428,6 +428,13 @@ async function handleCallback(db,env,ctx,q){
   const data=String(q.data||'');
   const [denied,maint]=await Promise.all([guardUser(db,env,uid),isAdmin(env,uid)?Promise.resolve({global:false,button:false}):maintenanceStatus(db,maintenanceActionId(data))]);
   if(denied)return sendText(env,uid,denied);
+  // Seven-day-old navigation messages are stale. Open a fresh home rather
+  // than executing obsolete buttons; never delete purchases or history.
+  const sourceDate=Number(q.message?.date||0);
+  if(!isAdmin(env,uid)&&sourceDate>0&&Date.now()/1000-sourceDate>7*86400){
+    await clearSession(db,uid);
+    return ui.home(db,env,uid);
+  }
   if(maint.global)return sendMaintenanceNotice(db,env,uid);
   if(data==='required_verify'){
     const gate=await gateState(db,env,uid);
