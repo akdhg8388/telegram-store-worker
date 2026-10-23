@@ -1,3 +1,4 @@
+import {categoryButton} from './category-emoji.js';
 import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
@@ -61,7 +62,7 @@ export async function home(db,env,uid,messageId=null) {
 export async function categories(db,env,uid,messageId=null) {
   const cats=await listCategories(db);
   const rows=[];
-  for(let i=0;i<cats.length;i+=3) rows.push(cats.slice(i,i+3).map(c=>button(`${c.emoji} ${short(languageOf(env)==='en'&&c.title_en||c.title,16)}`,`category:${c.id}:0`,'primary')));
+  for(let i=0;i<cats.length;i+=3) rows.push(cats.slice(i,i+3).map(c=>categoryButton(c,short(languageOf(env)==='en'&&c.title_en||c.title,16),`category:${c.id}:0`,'primary')));
   rows.push([button('🔎 البحث','search','primary'),button('🛍️ جميع المنتجات','products:0','success')]);
   rows.push(backRow());
   const decorated=await decoratedMessage(db,'shop','🛍️ أقسام المتجر\n\nاختر القسم الذي تريده:');
