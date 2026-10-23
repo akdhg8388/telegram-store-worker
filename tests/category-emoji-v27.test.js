@@ -9,7 +9,7 @@ import {categories} from '../src/ui.js';
 const id='5400000000000000099';
 function fixture(){
  const c=new DatabaseSync(':memory:');
- for(const name of readdirSync(new URL('../migrations/',import.meta.url)).filter(n=>/^00\\d\\d_.*\\.sql$/.test(n)).sort())
+ for(const name of readdirSync(new URL('../migrations/',import.meta.url)).filter(n=>/^00\d\d_.*\.sql$/.test(n)).sort())
    c.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
  const db={prepare(sql){const st=c.prepare(sql);let args=[];const q={bind(...a){args=a;return q},async first(){return st.get(...args)||null},async all(){return {results:st.all(...args)}},async run(){const x=st.run(...args);return {meta:{changes:x.changes,last_row_id:Number(x.lastInsertRowid)}}}};return q}};
  return {db,c};
