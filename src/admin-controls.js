@@ -1,3 +1,4 @@
+import {categoryButton,parseCategoryEmoji} from './category-emoji.js';
 import {button,keyboard,short,formatStars,formatIQD,positiveInt,isAdmin} from './common.js';
 import {sendText,sendOrEditText,telegram} from './telegram.js';
 import {updateBotProfilePicture} from './bot-profile.js';
@@ -192,8 +193,8 @@ async function warrantyMenu(db,env,uid,id,messageId=null){
 }
 async function categories(db,env,uid,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
-  const list=(await db.prepare('SELECT id,title,emoji,active FROM categories ORDER BY id DESC LIMIT 40').all()).results??[];
-  const rows=list.map(c=>[button(`${c.active?'🟢':'🔴'} #${c.id} ${short(c.emoji,6)} ${short(c.title,32)}`,`admin_category:${c.id}`)]);
+  const list=(await db.prepare('SELECT id,title,emoji,custom_emoji_id,active FROM categories ORDER BY id DESC LIMIT 40').all()).results??[];
+  const rows=list.map(c=>[categoryButton(c,`${c.active?'🟢':'🔴'} #${c.id} ${short(c.title,32)}`,`admin_category:${c.id}`)]);
   rows.push([button('➕ إضافة قسم','admin_addcategory')],adminBack);
   return reply('📂 إدارة الأقسام\n\nاختر قسماً لتعديل اسمه ورمزه أو إظهاره وإخفائه.',keyboard(...rows));
 }
@@ -520,9 +521,9 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   }
   else if(data.startsWith('admin_product_categories:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
-    const cats=(await db.prepare('SELECT id,title,emoji FROM categories WHERE active=1 ORDER BY id').all()).results??[];
+    const cats=(await db.prepare('SELECT id,title,emoji,custom_emoji_id FROM categories WHERE active=1 ORDER BY id').all()).results??[];
     await sendText(env,uid,`📂 اختر القسم الجديد للمنتج #${id}:`,keyboard(
-      ...cats.slice(0,35).map(c=>[button(`${c.emoji} #${c.id} ${short(c.title,36)}`,`admin_product_move:${id}:${c.id}`)]),
+      ...cats.slice(0,35).map(c=>[categoryButton(c,`#${c.id} ${short(c.title,36)}`,`admin_product_move:${id}:${c.id}`)]),
       backTo(`admin_product:${id}`),adminBack));
   }
   else if(data.startsWith('admin_product_move:')){
@@ -544,7 +545,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     const [, id,field]=data.split(':');
     if(!['title','title_en','emoji'].includes(field)||!positiveInt(id))return true;
     await setSession(db,uid,'owner_category_field',{id:Number(id),field});
-    await sendText(env,uid,`✏️ أرسل ${field==='title'?'اسم القسم الجديد':field==='title_en'?'الاسم الإنجليزي للقسم':'الرمز التعبيري'} للقسم #${id}. للإلغاء /cancel. لمسح الاسم الإنجليزي أرسل /empty.`);
+    await sendText(env,uid,`✏️ أرسل ${field==='title'?'اسم القسم الجديد':field==='title_en'?'الاسم الإنجليزي للقسم':'رمزاً عادياً أو متحركاً من لوحة إيموجي Telegram'} للقسم #${id}. للإلغاء /cancel. لمسح الاسم الإنجليزي أرسل /empty.`);
   }
   else if(data.startsWith('admin_category_toggle:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
@@ -702,6 +703,15 @@ export async function handleAdminText(db,env,uid,session,message){
   }
   if(session.action==='owner_category_field'){
     const {id,field}=session.payload||{};
+    if(field==='emoji'){
+      const parsed=parseCategoryEmoji(message);
+      if(!positiveInt(id)||!parsed){await sendText(env,uid,'❌ أرسل رمزاً تعبيرياً واحداً عادياً أو متحركاً من لوحة رموز Telegram.');return true;}
+      const res=await db.prepare('UPDATE categories SET emoji=?,custom_emoji_id=? WHERE id=?').bind(parsed.emoji,parsed.customEmojiId,id).run();
+      await clearSession(db,uid);
+      if(res.meta?.changes)await audit(db,uid,'edit_emoji','category',id);
+      await sendText(env,uid,res.meta?.changes?'✅ تم تحديث رمز القسم.':'القسم غير موجود.',keyboard([button('📂 عرض القسم',`admin_category:${id}`)],adminBack));
+      return true;
+    }
     const limit=field==='title'||field==='title_en'?70:8;
     if(!['title','title_en','emoji'].includes(field)||(!text&&field!=='title_en')||text.length>limit){await sendText(env,uid,`أدخل قيمة لا تتجاوز ${limit} أحرف.`);return true;}
     const res=await db.prepare(`UPDATE categories SET ${field}=? WHERE id=?`).bind(text==='/empty'&&field==='title_en'?null:text,id).run();
