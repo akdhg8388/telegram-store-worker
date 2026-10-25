@@ -2,7 +2,14 @@ import {translateTelegramParams,languageOf,userLanguage} from './i18n.js';
 const BASE = 'https://api.telegram.org/bot';
 export async function telegram(env, method, params) {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN is missing');
+  const original=params;
   params=translateTelegramParams(method,params,languageOf(env));
+  // Preserve full-message bold after locale translation changes string length.
+  if(Array.isArray(original?.entities)&&original.entities.length===1&&original.entities[0].type==='bold'
+     &&original.entities[0].offset===0&&original.entities[0].length===String(original.text||'').length
+     &&typeof params.text==='string' &&params.text!==original.text){
+    params={...params,entities:[{type:'bold',offset:0,length:params.text.length}]};
+  }
   // Internal fallbacks must never go over the Telegram Bot API wire.
   const request={...params};
   if(request.reply_markup?.inline_keyboard)request.reply_markup={...request.reply_markup,

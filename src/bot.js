@@ -12,7 +12,8 @@ import {amountInIQD,topupDecisionText,guardUser} from './moderation.js';
 import {submitSupport,handleSupportCallback,handleSupportReply,handleCustomerSupportCallback} from './support.js';
 import {handleUserCallback,handleUserText} from './admin-users.js';
 import {beginPurchase,commitPurchase,showReceipt,purchaseList} from './wallet-purchase.js';
-import {readPurchaseViewIds,cleanupPurchaseViews} from './purchase-views.js';
+import {readPurchaseViewIds,cleanupPurchaseViews,trackPurchaseView} from './purchase-views.js';
+import {boldEntities} from './v25-format.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 
@@ -22,8 +23,8 @@ async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}
     else await queueNotification(db,'sendMessage',{chat_id:admin,text:short(text,3900),...(markup?{reply_markup:markup}:{})},metadata);
   }
 }
-async function notifyUser(db,uid,text,markup=null) {
-  await queueNotification(db,'sendMessage',{chat_id:uid,text:short(text,3900),...(markup?{reply_markup:markup}:{})});
+async function notifyUser(db,uid,text,markup=null,options={}) {
+  await queueNotification(db,'sendMessage',{chat_id:uid,text:short(text,3900),...(markup?{reply_markup:markup}:{}),...(options.entities?{entities:options.entities}:{})});
 }
 // These are presentation-only messages; NEVER touch financial records on deletion.
 async function trackTopupAdminMessage(db,adminId,topupId,messageId){
@@ -367,7 +368,7 @@ async function settleTopup(db,env,ctx,uid,id,amount=null,messageId=null){
   const customer=await getUser(db,current.user_tg_id);
   const notice=approved?`✅ تم شحن محفظتك بنجاح!\n\n🧾 رقم الطلب: #${id}\n💰 المبلغ المطلوب: ${formatIQD(current.amount_iqd)}\n✅ المبلغ المضاف فعلياً: ${formatIQD(amount)}\n💳 رصيد المحفظة: ${formatIQD(customer.wallet_balance_iqd)}\n💸 الوسيلة: ${moneyMethods[current.method]}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت الاعتماد: ${baghdadDate(current.decided_at)}\n🟢 الحالة: مكتملة\n\nشكراً لاستخدامك My Store.`
     :`❌ تم رفض طلب شحن المحفظة #${id}.\n\n💰 المبلغ المطلوب: ${formatIQD(current.amount_iqd)}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت القرار: ${baghdadDate(current.decided_at)}\nلم تتم إضافة أي مبلغ. للمساعدة افتح قسم الدعم.`;
-  await notifyUser(db,current.user_tg_id,notice,keyboard([button('📦 طلباتي','orders','primary'),button('💳 محفظتي','wallet','success')]));
+  await notifyUser(db,current.user_tg_id,notice,keyboard([button('📦 طلباتي','orders','primary'),button('💳 محفظتي','wallet','success')]),approved?{entities:boldEntities(notice)}:{});
   // Financial commit and customer notification are already durable. Cleanup is
   // best-effort and scheduled separately to keep approval latency low.
   ctx.waitUntil(cleanupSettledTopup(db,env,uid,id,messageId,current.admin_notice_message_id)
@@ -458,7 +459,8 @@ async function handleCallback(db,env,ctx,q){
     const stale=readPurchaseViewIds(db,uid).catch(e=>{console.error('Purchase-view lookup failed',String(e));return [];});
     await clearSession(db,uid);
     const homeResult=await ui.home(db,env,uid,q.message?.message_id);
-    ctx.waitUntil(stale.then(ids=>cleanupPurchaseViews(db,env,uid,ids,q.message?.message_id))
+    const editedId=!env.__callback_media && q.message?.message_id ? q.message.message_id : null;
+    ctx.waitUntil(stale.then(ids=>cleanupPurchaseViews(db,env,uid,ids,editedId))
       .catch(e=>console.error('Purchase-view cleanup failed',String(e))));
     return homeResult;
   }
@@ -685,7 +687,7 @@ export async function processUpdate(db,env,ctx,update){
   // Media-message callbacks cannot be edited using editMessageText. Carry the
   // source type only for this update to avoid a failing Telegram API round trip.
   const source=update.callback_query?.message;
-  env={...env,__knownUser:knownUser,__locale:locale,
+  env={...env,__knownUser:knownUser,__locale:locale,__trackTransient:(id,message)=>ctx.waitUntil(trackPurchaseView(db,id,message)),
     __callback_message_id:source?.message_id??null,
     __callback_media:!!(source?.photo?.length||source?.video||source?.animation||source?.document)};
   if(update.pre_checkout_query) await telegram(env,'answerPreCheckoutQuery',{pre_checkout_query_id:update.pre_checkout_query.id,ok:false,error_message:'تم إيقاف نظام النجوم للطلبات الجديدة. تواصل مع الدعم بشأن الطلبات السابقة.'});

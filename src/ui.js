@@ -13,6 +13,12 @@ import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 import {sendPhotoCard,cardEntities} from './product-card.js';
 import {isMaintenanceButtonEnabled} from './maintenance.js';
 
+// Temporary navigation messages are tracked in the background; never track receipts.
+async function transientText(env,uid,text,markup,messageId=null,options={}){
+  const sent=await sendOrEditText(env,uid,text,markup,messageId,options);
+  if(sent)env.__trackTransient?.(uid,sent);
+  return sent;
+}
 export async function home(db,env,uid,messageId=null) {
   const lang=languageOf(env);
   // Fetch button configurations and welcome settings together. This replaces
@@ -136,7 +142,7 @@ export async function productView(db,env,uid,id,messageId=null){
     [button(fav?'💔 إزالة من المفضلة':'💗 إضافة للمفضلة',`favorite:${id}`,'primary')],
     [button('🔄 تحديث المخزون',`product:${id}`,'primary'),button('🛍️ الأقسام','categories','primary')],backRow());
   const entities=cardEntities(decorated.text,[priceLabel,stockLabel,deliveryLabel,durationLabel],decorated.options?.entities||[]);
-  return sendPhotoCard(env,uid,p.photo_file_id,decorated.text,markup,{messageId,entities,preserveText:en});
+  return sendPhotoCard(env,uid,p.photo_file_id,decorated.text,markup,{messageId,entities,preserveText:en,onMessage:sent=>env.__trackTransient?.(uid,sent)});
 }
 export async function walletSummary(db,uid){
   const u=await getUser(db,uid);
@@ -167,7 +173,7 @@ export async function profile(db,env,uid,messageId=null){
     [button('💳 شحن الرصيد','topup','success')],
     [button('📦 طلباتي','orders','primary')],
     [button('📑 سجل العمليات','transactions','primary')],
-    [button('💗 المفضلة','favorites','primary')],backRow()),messageId,decorated.options);
+    [button('💗 المفضلة','favorites','primary')],backRow()),messageId,{...decorated.options,entities:[...(decorated.options?.entities||[]),...boldEntities(decorated.text)],preserveText:true});
 }
 export async function wallet(db,env,uid,messageId=null){
   const w=await walletSummary(db,uid);
@@ -227,7 +233,7 @@ export async function favorites(db,env,uid,messageId=null){
 }
 export async function topupPresets(db,env,uid,messageId=null){
   const w=await walletSummary(db,uid);
-  if(!w.rate)return sendOrEditText(env,uid,'⚠️ يجب على المدير تحديد سعر صرف الدولار بالدينار من لوحة الإعدادات قبل إنشاء طلبات الشحن.',keyboard([button('💳 محفظتي','wallet','primary')],backRow()),messageId);
+  if(!w.rate)return transientText(env,uid,'⚠️ يجب على المدير تحديد سعر صرف الدولار بالدينار من لوحة الإعدادات قبل إنشاء طلبات الشحن.',keyboard([button('💳 محفظتي','wallet','primary')],backRow()),messageId);
   const rows=[];
   for(let i=0;i<USD_PRESETS.length;i+=3){
     rows.push(USD_PRESETS.slice(i,i+3).map(usd=>{
@@ -238,7 +244,7 @@ export async function topupPresets(db,env,uid,messageId=null){
   rows.push([button('✏️ أدخل مبلغاً مخصصاً','topup_custom','success')]);
   rows.push([button('💱 تغيير العملة','currency','primary')]);
   rows.push([button('↩️ رجوع','wallet','danger')]);
-  return sendOrEditText(env,uid,`💳 شحن المحفظة\n\n💰 الرصيد: ${w.shown}\nاختر المبلغ المطلوب (${w.currency}):\n\n💱 سعر الصرف المعتمد: 1 USD = ${formatIQD(w.rate)}\nسيظهر مبلغ التحويل النهائي قبل التأكيد.`,keyboard(...rows),messageId);
+  return transientText(env,uid,`💳 شحن المحفظة\n\n💰 الرصيد: ${w.shown}\nاختر المبلغ المطلوب (${w.currency}):\n\n💱 سعر الصرف المعتمد: 1 USD = ${formatIQD(w.rate)}\nسيظهر مبلغ التحويل النهائي قبل التأكيد.`,keyboard(...rows),messageId);
 }
 export async function topupMethods(db,env,uid,quote,messageId=null){
   const instructions=await getSetting(db,'topup_instructions','');
@@ -248,15 +254,15 @@ export async function topupMethods(db,env,uid,quote,messageId=null){
   }
   rows.push([button('↩️ رجوع إلى المبالغ','topup','danger')]);
   const text=`💳 اختيار طريقة الشحن\n\n💰 المبلغ المطلوب: ${formatQuote(quote)}\n\n${rows.length===1?'⚠️ لا توجد طرق شحن مهيأة حالياً. أضف أرقام/حسابات الاستلام من لوحة الإدارة.':'اختر طريقة التحويل من الخيارات المتاحة.'}${instructions?'\n\n'+short(instructions,900):''}`;
-  return sendOrEditText(env,uid,text,keyboard(...rows),messageId);
+  return transientText(env,uid,text,keyboard(...rows),messageId);
 }
 export async function topupEvidence(db,env,uid,quote,method,messageId=null){
   const receiver=await receiverFor(db,env,method);
   const instructions=await getSetting(db,'topup_instructions','');
-  return sendOrEditText(env,uid,`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`,keyboard([button('↩️ إلغاء الطلب','topup_cancel','danger')]),messageId,{entities:boldEntities(`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`),preserveText:true});
+  return transientText(env,uid,`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`,keyboard([button('↩️ إلغاء الطلب','topup_cancel','danger')]),messageId,{entities:boldEntities(`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`),preserveText:true});
 }
 export async function topupConfirm(db,env,uid,payload,messageId=null){
-  return sendOrEditText(env,uid,`📋 مراجعة طلب شحن المحفظة
+  return transientText(env,uid,`📋 مراجعة طلب شحن المحفظة
 
 💰 المبلغ: ${formatQuote(payload)}
 💳 وسيلة الدفع: ${moneyMethods[payload.method]}
