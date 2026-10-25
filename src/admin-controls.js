@@ -1,4 +1,5 @@
 import {categoryButton,parseCategoryEmoji} from './category-emoji.js';
+import {parseInventoryLines,readInventoryFile} from './inventory-import.js';
 import {button,keyboard,short,formatStars,formatIQD,positiveInt,isAdmin} from './common.js';
 import {sendText,sendOrEditText,telegram} from './telegram.js';
 import {updateBotProfilePicture} from './bot-profile.js';
@@ -164,7 +165,7 @@ async function productDetail(db,env,uid,id,messageId=null){
   rows.push([button('🛡️ حالة الضمان: '+(p.warranty_visible?(p.warranty_available?'يوجد ضمان':'لا يوجد ضمان'):'مخفي'),`admin_product_warranty:${id}`,'primary')]);
   rows.push([button('📷 إضافة/تغيير صورة المنتج',`admin_product_photo:${id}`,'primary'),button('🗑️ حذف الصورة',`admin_product_photo_delete:${id}`,'danger')]);
   rows.push([button('📦 تسليم محتوى ثابت',`admin_product_mode:${id}:shared`,'success'),button('🔑 تسليم كود فريد',`admin_product_mode:${id}:unique`,'primary')]);
-  rows.push([button('➕ إضافة أكواد (كود في كل سطر)',`admin_product_code:${id}`,'success'),button('⏸️ إيقاف الشراء التلقائي',`admin_product_mode:${id}:disabled`,'danger')]);
+  rows.push([button('➕ أكواد / روابط / ملف TXT أو CSV',`admin_product_code:${id}`,'success'),button('⏸️ إيقاف الشراء التلقائي',`admin_product_mode:${id}:disabled`,'danger')]);
   rows.push([button('📂 نقل إلى قسم آخر',`admin_product_categories:${id}`)]);
   rows.push([button(p.active?'🚫 إخفاء المنتج':'✅ إظهار المنتج',`admin_product_toggle:${id}:active`,p.active?'danger':'success'),
              button(p.featured?'⭐ إلغاء التمييز':'🌟 تمييز المنتج',`admin_product_toggle:${id}:featured`)]);
@@ -499,7 +500,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_product_code:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
     await setSession(db,uid,'owner_product_code',{id});
-    await sendText(env,uid,'🔑 أرسل كوداً واحداً، أو حتى 50 كوداً دفعة واحدة (كود في كل سطر).\n\nكل عملية شراء تستلم كوداً مختلفاً، والأكواد المباعة لا تعود للمخزون. لن تتكرر الأكواد المتطابقة.\n\nللإلغاء /cancel.');
+    await sendText(env,uid,'🔑 أرسل حتى 50 كوداً أو رابطاً (عنصر في كل سطر)، أو أرسل ملف TXT أو CSV (حتى 500 عنصر، 180 KB).\n\nكل عملية شراء تستلم عنصراً واحداً فقط، ولا يتكرر تسليمه.\n\nللإلغاء /cancel.');
   }
   else if(data.startsWith('admin_product_warranty_set:')){
     const [,rawId,mode]=data.split(':');const id=positiveInt(rawId);
@@ -587,12 +588,12 @@ export async function handleAdminText(db,env,uid,session,message){
   if(session.action==='owner_product_code'){
     const id=positiveInt(session.payload?.id);
     if(!id)return true;
-    const values=text.split(/\r?\n/).map(v=>v.trim()).filter(Boolean);
-    if(!values.length||values.length>50||text.length>3900||values.some(v=>v.length>1800)){
-      await sendText(env,uid,'❌ أرسل من 1 إلى 50 كوداً، كود واحد في كل سطر. الحد الأقصى للرسالة 3900 حرف.');
-      return true;
-    }
-    const codes=[...new Set(values)];
+    let parsed;
+    try{
+      if(message.document)parsed=parseInventoryLines(await readInventoryFile(env,message.document),500);
+      else parsed=parseInventoryLines(text,50);
+    }catch(e){await sendText(env,uid,'❌ '+String(e.message||'صيغة غير صالحة.').slice(0,200));return true;}
+    const {values,unique:codes}=parsed;
     const product=await db.prepare('SELECT id FROM products WHERE id=?').bind(id).first();
     if(!product){await clearSession(db,uid);return sendText(env,uid,'المنتج غير موجود.');}
     // D1 batch is an atomic transaction: reject duplicate values, never overwrite sold codes.
@@ -611,7 +612,7 @@ export async function handleAdminText(db,env,uid,session,message){
     const available=await db.prepare(`SELECT COUNT(*) n FROM product_delivery_items i WHERE i.product_id=?
       AND i.used_by_purchase_id IS NULL AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
         WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL))`).bind(id).first();
-    await sendText(env,uid,`✅ أضيف ${added} كود فريد.\n🔁 أكواد مكررة لم تُضف: ${values.length-added}\n🔑 الأكواد الباقية للبيع: ${available?.n||0}\n\nلتفعيلها اختر «🔑 تسليم كود فريد». وكل شراء جديد يستهلك كوداً واحداً دون إعادة استخدامه.`,keyboard([button('📦 إعداد المنتج',`admin_product:${id}`,'success')],adminBack));
+    await sendText(env,uid,`✅ أضيف ${added} كود أو رابط فريد.\n🔁 عناصر مكررة لم تُضف: ${values.length-added}\n🔑 العناصر الباقية للبيع: ${available?.n||0}\n\nلتفعيلها اختر «🔑 تسليم كود فريد». وكل شراء جديد يستهلك كوداً واحداً دون إعادة استخدامه.`,keyboard([button('📦 إعداد المنتج',`admin_product:${id}`,'success')],adminBack));
     return true;
   }
   if(session.action==='owner_bot_profile_picture'){
