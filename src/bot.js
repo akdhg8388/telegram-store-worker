@@ -459,7 +459,8 @@ async function handleCallback(db,env,ctx,q){
     const stale=readPurchaseViewIds(db,uid).catch(e=>{console.error('Purchase-view lookup failed',String(e));return [];});
     await clearSession(db,uid);
     const homeResult=await ui.home(db,env,uid,q.message?.message_id);
-    ctx.waitUntil(stale.then(ids=>cleanupPurchaseViews(db,env,uid,ids,q.message?.message_id))
+    const editedId=homeResult?.message_id===q.message?.message_id?q.message.message_id:null;
+    ctx.waitUntil(stale.then(ids=>cleanupPurchaseViews(db,env,uid,ids,editedId))
       .catch(e=>console.error('Purchase-view cleanup failed',String(e))));
     return homeResult;
   }
