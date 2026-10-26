@@ -1,6 +1,5 @@
 import {formatIQD, short, moneyMethods} from './common.js';
 import {getSetting} from './settings.js';
-import {paymentMethod} from './payment-methods.js';
 
 export const USD_PRESETS = Object.freeze([10,25,100,250,500,1000]);
 export const PAY_METHODS = Object.freeze(['zain_balance','superqi','binance']);
@@ -25,8 +24,9 @@ export async function isTopupEnabled(db,env){
   return (await getSetting(db,'manual_topups_enabled',env.ENABLE_MANUAL_TOPUPS||'false'))==='true';
 }
 export async function receiverFor(db,env,method){
-  const m=await paymentMethod(db,env,method);
-  return m?.enabled&&m?.visible?String(m.receiver||'').trim():'';
+  if(!PAY_METHODS.includes(method))return '';
+  const fallback=String(env[RECEIVER_ENVS[method]]||'').trim();
+  return String(await getSetting(db,RECEIVER_KEYS[method],fallback)).trim();
 }
 export function quoteFromUSD(usd,rate,currency='USD'){
   if(!Number.isSafeInteger(usd)||!USD_PRESETS.includes(usd))return null;
