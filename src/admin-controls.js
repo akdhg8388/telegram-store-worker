@@ -347,7 +347,9 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
       await updateSetting(db,homeSettingKey(id,'color'),selected,uid);
       await audit(db,uid,'set_button_color','ui',0);
     }
-    return sendOrEditText(env,uid,'🌈 لون زر '+HOME_BUTTONS.find(x=>x.id===id).ar+'\n\nاختر اللون. الافتراضي يترك Telegram يختار اللون حسب ثيم المستخدم.',keyboard(
+    // Even an unchanged Telegram palette is a handled callback: do not fall
+    // through to the "unsupported button" handler when the edit is a no-op.
+    await sendOrEditText(env,uid,'🌈 لون زر '+HOME_BUTTONS.find(x=>x.id===id).ar+'\n\nاختر اللون. الافتراضي يترك Telegram يختار اللون حسب ثيم المستخدم.',keyboard(
       [button('🔵 أزرق',`admin_home_button_color:${id}:primary`,'primary')],
       [button('🟢 أخضر',`admin_home_button_color:${id}:success`,'success')],
       [button('🔴 أحمر',`admin_home_button_color:${id}:danger`,'danger')],
@@ -419,10 +421,10 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_pay:')){
     const key=data.split(':')[1],m=await paymentMethod(db,env,key);
     if(!m)return sendText(env,uid,'هذه الوسيلة غير موجودة.');
-    await sendOrEditText(env,uid,`💳 وسيلة الدفع: ${paymentName(m,'ar')}\n✨ الرمز المتحرك: ${m.icon_custom_emoji_id?'✅ مضاف':'غير مضاف'}\n📝 بيانات الاستلام: ${m.receiver?'✅ محفوظة':'غير مضافة'}\n📷 الصورة: ${m.photo_file_id?'✅ موجودة':'غير مضافة'}\n✅ مفعلة: ${m.enabled?'نعم':'لا'}\n👁️ ظاهرة: ${m.visible?'نعم':'لا'}`,keyboard(
+    await sendOrEditText(env,uid,`💳 وسيلة الدفع: ${paymentName(m,'ar')}\n✨ الرمز التعبيري: ${m.icon_custom_emoji_id||m.icon_fallback?'✅ مضاف':'غير مضاف'}\n📝 بيانات الاستلام: ${m.receiver?'✅ محفوظة':'غير مضافة'}\n📷 الصورة: ${m.photo_file_id?'✅ موجودة':'غير مضافة'}\n✅ مفعلة: ${m.enabled?'نعم':'لا'}\n👁️ ظاهرة: ${m.visible?'نعم':'لا'}`,keyboard(
       [button('✏️ تعديل الاسم العربي',`admin_pay_edit:${key}:ar`)],
-      [button('✨ إضافة / تغيير رمز تعبيري متحرك',`admin_pay_edit:${key}:icon`)],
-      ...(m.icon_custom_emoji_id?[[button('🗑️ إزالة الرمز التعبيري',`admin_pay_icon_delete:${key}`,'danger')]]:[]),
+      [button('✨ إضافة / تغيير رمز تعبيري',`admin_pay_edit:${key}:icon`)],
+      ...(m.icon_custom_emoji_id||m.icon_fallback?[[button('🗑️ إزالة الرمز التعبيري',`admin_pay_icon_delete:${key}`,'danger')]]:[]),
       [button('📝 بيانات الاستلام عربي',`admin_pay_edit:${key}:receiver`)],
       [button('📷 إضافة / تغيير الصورة',`admin_pay_edit:${key}:photo`)],
       [button('🗑️ حذف صورة الاستلام',`admin_pay_photo_delete:${key}`,'danger')],
@@ -435,7 +437,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     if(!['ar','receiver','photo','icon'].includes(field)||!await paymentMethod(db,env,key))return true;
     await setSession(db,uid,'owner_pay_edit',{key,field});
     await sendText(env,uid,field==='icon'
-      ?'✨ أرسل رمزاً متحركاً من Telegram أو رقم custom_emoji_id من 10 إلى 30 رقماً. للإزالة /empty، للإلغاء /cancel.'
+      ?'✨ أرسل رمزاً تعبيرياً ثابتاً أو متحركاً من Telegram، أو رقم custom_emoji_id من 10 إلى 30 رقماً. للإزالة /empty، للإلغاء /cancel.'
       :field==='photo'?'📷 أرسل صورة Telegram لبيانات الاستلام.'
       :field.startsWith('receiver')?'📝 أرسل تفاصيل الاستلام كنص، ويمكن تضمين الرموز المتحركة (حتى 800 حرف).'
       :'🏷️ أرسل الاسم الجديد فقط (حتى 65 حرفاً) بدون رمز متحرك. للإلغاء /cancel.');
@@ -638,10 +640,18 @@ export async function handleAdminText(db,env,uid,session,message){
       }else{
         const emoji=extractPaymentEmoji(message);
         const id=emoji.id||(/^\d{10,30}$/.test(text)?text:null);
-        if(!id){await sendText(env,uid,'❌ أرسل رمزاً متحركاً حقيقياً أو رقم custom_emoji_id صحيحاً، أو /empty للإزالة.');return true;}
-        if(await isStaticCustomEmoji(env,id)){await sendText(env,uid,'⚠️ هذا الرمز ثابت. أرسل رمزاً متحركاً أو فيديو إيموجي.');return true;}
-        const fallback=emoji.fallback||'💳';
-        const clean=paymentName({...existing,icon_custom_emoji_id:id,icon_fallback:fallback},'ar');
+        // A single Unicode emoji is also valid; no Telegram custom emoji ID needed.
+        // This is checked only when the owner edits a method, not on customer paths.
+        const unicodeEmoji=!id && text.length<=16 &&
+          [...new Intl.Segmenter('und',{granularity:'grapheme'}).segment(text)].length===1 &&
+          /[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Presentation}]/u.test(text)?text:null;
+        if(!id&&!unicodeEmoji){
+          await sendText(env,uid,'❌ أرسل رمزاً ثابتاً أو متحركاً واحداً من Telegram، أو رقم custom_emoji_id صحيحاً، أو /empty للإزالة.');
+          return true;
+        }
+        // Static Telegram custom emoji IDs work exactly like animated ones.
+        const fallback=emoji.fallback||unicodeEmoji||existing.icon_fallback||'💳';
+        const clean=paymentName(existing,'ar');
         await db.prepare('UPDATE payment_methods SET name_ar=?,icon_custom_emoji_id=?,icon_fallback=? WHERE method_key=?')
           .bind(clean,id,fallback,key).run();
       }

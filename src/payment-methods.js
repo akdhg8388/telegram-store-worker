@@ -6,7 +6,7 @@ export const LEGACY_KEYS=Object.freeze(Object.keys(defaults));
 // from historical names at read time without changing stored payment data.
 export function paymentName(m,lang='ar'){
  const raw=String(lang==='en'&&m.name_en||m.name_ar||m.method_key);
- if(!/^\d{10,30}$/.test(String(m.icon_custom_emoji_id||'')))return raw.slice(0,65);
+ if(!/^\d{10,30}$/.test(String(m.icon_custom_emoji_id||'')) && !m.icon_fallback)return raw.slice(0,65);
  const fallback=String(m.icon_fallback||'');
  const withoutFallback=fallback?raw.split(fallback).join(' '):raw;
  const clean=withoutFallback
@@ -21,6 +21,9 @@ export function paymentButton(m,lang,callback){
  if(/^\d{10,30}$/.test(String(m.icon_custom_emoji_id||''))){
    b.icon_custom_emoji_id=m.icon_custom_emoji_id;
    b._emoji_fallback_text=(m.icon_fallback||'💳')+' '+name;
+ }else if(m.icon_fallback){
+   // Ordinary static Unicode emoji: render once in button text.
+   b.text=String(m.icon_fallback)+' '+name;
  }
  return b;
 }
