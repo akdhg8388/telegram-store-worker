@@ -30,6 +30,8 @@ async function isStaticCustomEmoji(env,id){
 
 
 export function adminRoute(data){
+  if(/^admin_home_button_color:[a-z_]+(?::(?:default|primary|success|danger))?$/.test(data)
+    || /^admin_pay_(?:edit:\w+:icon|icon_delete:\w+)$/.test(data))return true;
   return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
@@ -59,7 +61,7 @@ async function homeButtonDetail(db,env,uid,key,messageId=null){
   return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n👁️ الحالة: ${visible?'ظاهر':'مخفي'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
     [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
     [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
-    [button('🌈 تغيير لون الزر',`admin_home_button_color:${key}:primary`,'primary')],
+    [button('🌈 تغيير لون الزر',`admin_home_button_color:${key}`,'primary')],
     ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)]]:[]),
     [button(visible?'🙈 إخفاء هذا الزر':'👁️ إظهار هذا الزر',`admin_home_button_toggle:${key}`,visible?'danger':'success')],
     [button('↩️ استعادة هذا الزر للأصل',`admin_home_button_reset:${key}`,'danger')],
@@ -412,13 +414,15 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data==='admin_topup_setup')await topupSetup(db,env,uid,messageId);
   else if(data==='admin_pay_add'){
     await setSession(db,uid,'owner_pay_add');
-    await sendText(env,uid,'➕ أرسل اسم وسيلة الدفع الجديدة بالعربية، ويمكنك وضع رمز متحرك مع الاسم. الحد الأقصى 65 حرفاً. للإلغاء /cancel.');
+    await sendText(env,uid,'➕ أرسل اسم وسيلة الدفع فقط (بدون رمز متحرك)، بحد أقصى 65 حرفاً. بعد الحفظ أضف الرمز من زره المستقل. للإلغاء /cancel.');
   }
   else if(data.startsWith('admin_pay:')){
     const key=data.split(':')[1],m=await paymentMethod(db,env,key);
     if(!m)return sendText(env,uid,'هذه الوسيلة غير موجودة.');
-    await sendOrEditText(env,uid,`💳 وسيلة الدفع: ${m.name_ar}\n📝 بيانات الاستلام: ${m.receiver?'✅ محفوظة':'غير مضافة'}\n📷 الصورة: ${m.photo_file_id?'✅ موجودة':'غير مضافة'}\n✅ مفعلة: ${m.enabled?'نعم':'لا'}\n👁️ ظاهرة: ${m.visible?'نعم':'لا'}`,keyboard(
+    await sendOrEditText(env,uid,`💳 وسيلة الدفع: ${paymentName(m,'ar')}\n✨ الرمز المتحرك: ${m.icon_custom_emoji_id?'✅ مضاف':'غير مضاف'}\n📝 بيانات الاستلام: ${m.receiver?'✅ محفوظة':'غير مضافة'}\n📷 الصورة: ${m.photo_file_id?'✅ موجودة':'غير مضافة'}\n✅ مفعلة: ${m.enabled?'نعم':'لا'}\n👁️ ظاهرة: ${m.visible?'نعم':'لا'}`,keyboard(
       [button('✏️ تعديل الاسم العربي',`admin_pay_edit:${key}:ar`)],
+      [button('✨ إضافة / تغيير رمز تعبيري متحرك',`admin_pay_edit:${key}:icon`)],
+      ...(m.icon_custom_emoji_id?[[button('🗑️ إزالة الرمز التعبيري',`admin_pay_icon_delete:${key}`,'danger')]]:[]),
       [button('📝 بيانات الاستلام عربي',`admin_pay_edit:${key}:receiver`)],
       [button('📷 إضافة / تغيير الصورة',`admin_pay_edit:${key}:photo`)],
       [button('🗑️ حذف صورة الاستلام',`admin_pay_photo_delete:${key}`,'danger')],
@@ -428,9 +432,20 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   }
   else if(data.startsWith('admin_pay_edit:')){
     const [,key,field]=data.split(':');
-    if(!['ar','receiver','photo'].includes(field)||!await paymentMethod(db,env,key))return true;
+    if(!['ar','receiver','photo','icon'].includes(field)||!await paymentMethod(db,env,key))return true;
     await setSession(db,uid,'owner_pay_edit',{key,field});
-    await sendText(env,uid,field==='photo'?'📷 أرسل صورة Telegram لبيانات الاستلام.':field.startsWith('receiver')?'📝 أرسل تفاصيل الاستلام كنص، ويمكن تضمين الرموز المتحركة (حتى 800 حرف).':'🏷️ أرسل الاسم الجديد (حتى 65 حرفاً)، ويمكن إضافة رمز متحرك. للإلغاء /cancel.');
+    await sendText(env,uid,field==='icon'
+      ?'✨ أرسل رمزاً متحركاً من Telegram أو رقم custom_emoji_id من 10 إلى 30 رقماً. للإزالة /empty، للإلغاء /cancel.'
+      :field==='photo'?'📷 أرسل صورة Telegram لبيانات الاستلام.'
+      :field.startsWith('receiver')?'📝 أرسل تفاصيل الاستلام كنص، ويمكن تضمين الرموز المتحركة (حتى 800 حرف).'
+      :'🏷️ أرسل الاسم الجديد فقط (حتى 65 حرفاً) بدون رمز متحرك. للإلغاء /cancel.');
+  }
+  else if(data.startsWith('admin_pay_icon_delete:')){
+    const key=data.split(':')[1],m=await paymentMethod(db,env,key);
+    if(!m)return true;
+    await db.prepare("UPDATE payment_methods SET name_ar=?,icon_custom_emoji_id=NULL,icon_fallback='' WHERE method_key=?")
+      .bind(paymentName(m,'ar'),key).run();
+    await handleAdminCallback(db,env,uid,'admin_pay:'+key,messageId);
   }
   else if(data.startsWith('admin_pay_photo_delete:')){
     const key=data.split(':')[1];await db.prepare('UPDATE payment_methods SET photo_file_id=NULL WHERE method_key=?').bind(key).run();
@@ -599,26 +614,41 @@ export async function handleAdminText(db,env,uid,session,message){
   const text=originalText.trim();
   if(session.action==='owner_pay_add'){
     if(!text||text.length>65||text.length<2){await sendText(env,uid,'❌ الاسم يجب أن يكون بين حرفين و65 حرفاً.');return true;}
+    if(extractPaymentEmoji(message).id){await sendText(env,uid,'❌ أرسل الاسم فقط، وأضف الرمز المتحرك من الزر المستقل.');return true;}
     const count=(await db.prepare('SELECT COUNT(*) n FROM payment_methods').first())?.n||0;
     if(count>=30){await sendText(env,uid,'❌ الحد الأقصى 30 وسيلة دفع.');return true;}
     const key='custom_'+crypto.randomUUID().replace(/-/g,'').slice(0,20);
-    const emoji=extractPaymentEmoji(message);
-    await db.prepare('INSERT INTO payment_methods(method_key,name_ar,icon_custom_emoji_id,icon_fallback,enabled,visible,sort_order) VALUES (?,?,?,?,0,0,?)')
-      .bind(key,text,emoji.id,emoji.fallback||'💳',100+count).run();
+    await db.prepare('INSERT INTO payment_methods(method_key,name_ar,enabled,visible,sort_order) VALUES (?,?,0,0,?)')
+      .bind(key,text,100+count).run();
     await clearSession(db,uid);await audit(db,uid,'add_payment_method','payment_method',0);
     await sendText(env,uid,'✅ أضيفت الوسيلة. أضف بيانات الاستلام ثم فعّلها وأظهرها.',keyboard([button('💳 إعداد الوسيلة','admin_pay:'+key)]));
     return true;
   }
   if(session.action==='owner_pay_edit'){
     const {key,field}=session.payload||{};
-    if(!['ar','receiver','photo'].includes(field)||!await paymentMethod(db,env,key))return true;
+    const existing=await paymentMethod(db,env,key);
+    if(!['ar','receiver','photo','icon'].includes(field)||!existing)return true;
     if(field==='photo'){
       if(!message.photo?.length){await sendText(env,uid,'📷 أرسل صورة Telegram أو /cancel.');return true;}
       await db.prepare('UPDATE payment_methods SET photo_file_id=? WHERE method_key=?').bind(message.photo.at(-1).file_id,key).run();
+    }else if(field==='icon'){
+      if(text==='/empty'){
+        await db.prepare("UPDATE payment_methods SET name_ar=?,icon_custom_emoji_id=NULL,icon_fallback='' WHERE method_key=?")
+          .bind(paymentName(existing,'ar'),key).run();
+      }else{
+        const emoji=extractPaymentEmoji(message);
+        const id=emoji.id||(/^\d{10,30}$/.test(text)?text:null);
+        if(!id){await sendText(env,uid,'❌ أرسل رمزاً متحركاً حقيقياً أو رقم custom_emoji_id صحيحاً، أو /empty للإزالة.');return true;}
+        if(await isStaticCustomEmoji(env,id)){await sendText(env,uid,'⚠️ هذا الرمز ثابت. أرسل رمزاً متحركاً أو فيديو إيموجي.');return true;}
+        const fallback=emoji.fallback||'💳';
+        const clean=paymentName({...existing,icon_custom_emoji_id:id,icon_fallback:fallback},'ar');
+        await db.prepare('UPDATE payment_methods SET name_ar=?,icon_custom_emoji_id=?,icon_fallback=? WHERE method_key=?')
+          .bind(clean,id,fallback,key).run();
+      }
     }else if(field==='ar'||field==='en'){
       if(!text||text.length>65){await sendText(env,uid,'❌ أرسل اسماً لا يتجاوز 65 حرفاً.');return true;}
-      const emoji=extractPaymentEmoji(message);
-      if(field==='ar')await db.prepare('UPDATE payment_methods SET name_ar=?,icon_custom_emoji_id=?,icon_fallback=? WHERE method_key=?').bind(text,emoji.id,emoji.fallback||'💳',key).run();
+      if(extractPaymentEmoji(message).id){await sendText(env,uid,'❌ أرسل الاسم دون رمز متحرك. استخدم زر الرمز المستقل.');return true;}
+      if(field==='ar')await db.prepare('UPDATE payment_methods SET name_ar=? WHERE method_key=?').bind(paymentName({...existing,name_ar:text},'ar'),key).run();
       else await db.prepare('UPDATE payment_methods SET name_en=? WHERE method_key=?').bind(text,key).run();
     }else{
       if(!text||text.length>800){await sendText(env,uid,'❌ بيانات الاستلام يجب أن تكون 1 إلى 800 حرف.');return true;}

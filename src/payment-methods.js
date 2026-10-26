@@ -2,7 +2,19 @@ import {getSetting} from './settings.js';
 import {button} from './common.js';
 const defaults={zain_balance:'ZAIN_BALANCE_RECEIVER',superqi:'SUPERQI_RECEIVER',binance:'BINANCE_RECEIVER',asiacell:'ASIACELL_RECEIVER',zaincash:'ZAINCASH_RECEIVER'};
 export const LEGACY_KEYS=Object.freeze(Object.keys(defaults));
-export function paymentName(m,lang='ar'){return (lang==='en'&&m.name_en||m.name_ar||m.method_key).slice(0,65);}
+// Telegram custom emoji buttons have a separate icon: remove duplicate glyphs
+// from historical names at read time without changing stored payment data.
+export function paymentName(m,lang='ar'){
+ const raw=String(lang==='en'&&m.name_en||m.name_ar||m.method_key);
+ if(!/^\d{10,30}$/.test(String(m.icon_custom_emoji_id||'')))return raw.slice(0,65);
+ const fallback=String(m.icon_fallback||'');
+ const withoutFallback=fallback?raw.split(fallback).join(' '):raw;
+ const clean=withoutFallback
+   .replace(/^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)+/u,'')
+   .replace(/\s*(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+)+$/u,'')
+   .trim().replace(/\s{2,}/g,' ');
+ return (clean||raw.trim()).slice(0,65);
+}
 export function paymentButton(m,lang,callback){
  const name=paymentName(m,lang);
  const b=button(name,callback,'success');
