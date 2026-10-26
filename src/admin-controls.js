@@ -30,7 +30,7 @@ async function isStaticCustomEmoji(env,id){
 
 
 export function adminRoute(data){
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\\w+|admin_pay_edit:\\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\\w+:(?:enabled|visible)|admin_pay_photo_delete:\\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -48,21 +48,19 @@ async function homeButtonList(db,env,uid,page=0,messageId=null){
   if(nav.length)rows.push(nav);
   rows.push([button('↩️ استعادة جميع أسماء ورموز الرئيسية','admin_home_reset_all','danger')]);
   rows.push([button('👁️ معاينة الرئيسية','admin_visual_preview','success')],[button('🎨 تخصيص الواجهة','admin_visuals')],adminBack);
-  return sendOrEditText(env,uid,'🎨 تخصيص أزرار الرئيسية\n\nاختر الزر لتعديل اسمه بالعربي والإنجليزي ورمزه المتحرك، بدون تغيير وظيفته.',keyboard(...rows),messageId);
+  return sendOrEditText(env,uid,'🎨 تخصيص أزرار الرئيسية\n\nاختر الزر لتعديل اسمه بالعربي ورمزه المتحرك، بدون تغيير وظيفته.',keyboard(...rows),messageId);
 }
 async function homeButtonDetail(db,env,uid,key,messageId=null){
   const def=HOME_BUTTONS.find(x=>x.id===key);
   if(!def)return;
   const visual=await loadVisualSettings(db);
   const ar=resolvedHomeButton(visual,key,'ar');
-  const en=resolvedHomeButton(visual,key,'en');
   const visible=visual[homeSettingKey(key,'visible')]!=='false';
-  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n🇬🇧 English: ${en.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n👁️ الحالة: ${visible?'ظاهر':'مخفي'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
+  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n👁️ الحالة: ${visible?'ظاهر':'مخفي'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
     [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
-    [button('✏️ Edit English label',`admin_setting_edit:${homeSettingKey(key,'label_en')}`)],
     [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
     [button('🌈 تغيير لون الزر',`admin_home_button_color:${key}:primary`,'primary')],
-    ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)],[button('📝 Edit English Description',`admin_setting_edit:${homeSettingKey(key,'description_en')}`)]]:[]),
+    ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)]:[]),
     [button(visible?'🙈 إخفاء هذا الزر':'👁️ إظهار هذا الزر',`admin_home_button_toggle:${key}`,visible?'danger':'success')],
     [button('↩️ استعادة هذا الزر للأصل',`admin_home_button_reset:${key}`,'danger')],
     [button('🎨 قائمة أزرار الرئيسية','admin_home_buttons:0')],adminBack),messageId);
@@ -425,9 +423,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     if(!m)return sendText(env,uid,'هذه الوسيلة غير موجودة.');
     await sendOrEditText(env,uid,`💳 وسيلة الدفع: ${m.name_ar}\n🇬🇧 ${m.name_en||'—'}\n📝 بيانات الاستلام: ${m.receiver?'✅ محفوظة':'غير مضافة'}\n📷 الصورة: ${m.photo_file_id?'✅ موجودة':'غير مضافة'}\n✅ مفعلة: ${m.enabled?'نعم':'لا'}\n👁️ ظاهرة: ${m.visible?'نعم':'لا'}`,keyboard(
       [button('✏️ تعديل الاسم العربي',`admin_pay_edit:${key}:ar`)],
-      [button('🇬🇧 Edit English name',`admin_pay_edit:${key}:en`)],
       [button('📝 بيانات الاستلام عربي',`admin_pay_edit:${key}:receiver`)],
-      [button('📝 English receiving details',`admin_pay_edit:${key}:receiver_en`)],
       [button('📷 إضافة / تغيير الصورة',`admin_pay_edit:${key}:photo`)],
       [button('🗑️ حذف صورة الاستلام',`admin_pay_photo_delete:${key}`,'danger')],
       [button(m.enabled?'⏸️ تعطيل الوسيلة':'✅ تفعيل الوسيلة',`admin_pay_toggle:${key}:enabled`,m.enabled?'danger':'success')],
