@@ -42,7 +42,7 @@ export async function referralAdmin(db,env,uid,messageId=null){
  [button(p.enabled?'⏸️ إيقاف المكافآت':'✅ تشغيل المكافآت','refadmin_toggle',p.enabled?'danger':'success')],
  [button(visible==='false'?'👁️ إظهار الإحالات':'🙈 إخفاء الإحالات','refadmin_visible','primary')],
  ...Object.entries(fields).map(([k,v])=>[button('✏️ '+v[0],'refadmin_edit:'+k,'primary')]),
- [button('📝 إشعار عربي','refadmin_notice:ar'),button('🇬🇧 English notice','refadmin_notice:en')],
+ [button('📝 إشعار عربي','refadmin_notice:ar')],
  [button('📜 سجل مكافآت الإحالات','refadmin_history')],ownerBack),messageId);
 }
 export async function adminHistory(db,env,uid,messageId=null){
