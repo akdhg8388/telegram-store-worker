@@ -78,7 +78,7 @@ test('V21 admin visible toggle hides the real home button, English referral page
   assert.ok(calls.at(-1).body.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='referrals'));
   await referralPage(db,{...env,__locale:'en'},102);
   assert.match(calls.at(-1).body.text,/برنامج الإحالات/);
-  assert.match(calls.at(-1).body.text,/Reward rate: 5%/);
+  assert.match(calls.at(-1).body.text,/نسبة المكافأة: 5%/);
  });}finally{c.close();}
 });
 test('V21 owner can set percentage and unlimited purchase count by Telegram controls',async()=>{
