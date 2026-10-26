@@ -16,7 +16,8 @@ test('payment icon is displayed once even for old names containing emoji',()=>{
  assert.equal(b._emoji_fallback_text,'🪙 رايزر جولد عالمي');
  assert.equal(paymentName({...m,name_ar:'🪙 رايزر جولد عالمي 🪙'}),'رايزر جولد عالمي');
  assert.equal(paymentName({...m,name_ar:'📱 رصيد زين'}),'رصيد زين');
- assert.equal(paymentName({...m,icon_custom_emoji_id:null,name_ar:'🪙 رايزر جولد عالمي'}),'🪙 رايزر جولد عالمي');
+ assert.equal(paymentName({...m,icon_custom_emoji_id:null,name_ar:'🪙 رايزر جولد عالمي'}),'رايزر جولد عالمي');
+ assert.equal(paymentButton({...m,icon_custom_emoji_id:null,name_ar:'🪙 رايزر جولد عالمي'},'ar','x').text,'🪙 رايزر جولد عالمي');
 });
 test('admin routes icon actions and home color picker',()=>{
  const id='5400000000000000099';
