@@ -29,6 +29,7 @@ export function homeButtonSettings(){
   const result={};
   for(const x of HOME_BUTTONS){
     result[homeSettingKey(x.id,'label_ar')]={label:`✏️ اسم زر ${x.ar} بالعربي`,max:52};
+    result[homeSettingKey(x.id,'label_en')]={label:`حقل قديم للتوافق — ${x.ar}`,max:52,internal:true,internalText:true};
     result[homeSettingKey(x.id,'icon')]={label:`✨ رمز زر ${x.ar}`,max:30,customEmoji:true};
     result[homeSettingKey(x.id,'color')]={label:`🌈 لون زر ${x.ar}`,max:8};
     result[homeSettingKey(x.id,'visible')]={label:`👁️ إظهار زر ${x.ar}`,max:5,toggle:true};
@@ -37,6 +38,7 @@ export function homeButtonSettings(){
     result[homeSettingKey(x.id,'inline_en')]={label:'Internal emoji fallback (English)',max:16,internal:true,internalText:true};
   }
   result[homeSettingKey('messages','description_ar')]={label:'📝 وصف صفحة رسائلي بالعربي',max:800};
+  result[homeSettingKey('messages','description_en')]={label:'حقل قديم محفوظ للتوافق',max:800,internal:true,internalText:true};
   for(const x of ICON_SLOTS)result[productIconKey(x.id)]={label:x.ar,max:30,customEmoji:true};
   return result;
 }
