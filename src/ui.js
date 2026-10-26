@@ -277,10 +277,12 @@ export async function topupEvidence(db,env,uid,quote,method,messageId=null){
  return transientText(env,uid,plain,markup,messageId,options);
 }
 export async function topupConfirm(db,env,uid,payload,messageId=null){
+  const selected=await paymentMethod(db,env,payload.method);
+  const methodLabel=selected?paymentName(selected,languageOf(env)):(moneyMethods[payload.method]||payload.method);
   return transientText(env,uid,`📋 مراجعة طلب شحن المحفظة
 
 💰 المبلغ: ${formatQuote(payload)}
-💳 وسيلة الدفع: ${moneyMethods[payload.method]}
+💳 وسيلة الدفع: ${methodLabel}
 🔢 رقم العملية: ${short(payload.reference||'غير متوفر',160)}
 📸 إثبات التحويل: ${payload.proofFileId?'✅ مرفق':'غير مرفق'}
 
