@@ -21,7 +21,7 @@ async function transientText(env,uid,text,markup,messageId=null,options={}){
   return sent;
 }
 export async function home(db,env,uid,messageId=null) {
-  const lang=languageOf(env);
+  const lang='ar';
   // Fetch button configurations and welcome settings together. This replaces
   // repeated per-button D1 queries and retains the owner's saved overrides.
   const [user,featuredRow,visual,count]=await Promise.all([
@@ -41,8 +41,7 @@ export async function home(db,env,uid,messageId=null) {
   rows.push([homeButton('wallet','success'),homeButton('profile','success')]);
   rows.push([homeButton('currency')]);
   rows.push([homeButton('orders'),homeButton('transactions')]);
-  rows.push([homeButton('messages','primary')]); // Telegram accent/blue varies by theme.
-  rows.push([homeButton('referrals'),homeButton('language')]);
+  rows.push([homeButton('referrals'),homeButton('messages','primary')]);
   // Reuse the existing bulk settings query (no additional D1 call).
   // A configured channel is a native Telegram URL button: one tap opens it,
   // without a news callback round trip or a second tap on a text link.
