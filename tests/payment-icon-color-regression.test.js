@@ -41,7 +41,7 @@ test('ordinary static emoji renders once with an independent fallback',()=>{
 
 function fixture(){
  const conn=new DatabaseSync(':memory:');
- for(const n of readdirSync(new URL('../migrations/',import.meta.url)).filter(n=>/^00\\d\\d_.*\\.sql$/.test(n)).sort())
+ for(const n of readdirSync(new URL('../migrations/',import.meta.url)).filter(n=>/^00\d\d_.*\.sql$/.test(n)).sort())
    conn.exec(readFileSync(new URL('../migrations/'+n,import.meta.url),'utf8'));
  conn.prepare("INSERT INTO users(tg_id,first_name) VALUES (991,'Owner')").run();
  conn.prepare("INSERT INTO payment_methods(method_key,name_ar,enabled,visible) VALUES ('custom_static','رايزر جولد عالمي',1,1)").run();
