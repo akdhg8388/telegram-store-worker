@@ -1,4 +1,5 @@
 import {categoryButton} from './category-emoji.js';
+import {methodList,paymentMethod,paymentName,paymentButton} from './payment-methods.js';
 import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
@@ -247,25 +248,41 @@ export async function topupPresets(db,env,uid,messageId=null){
   return transientText(env,uid,`💳 شحن المحفظة\n\n💰 الرصيد: ${w.shown}\nاختر المبلغ المطلوب (${w.currency}):\n\n💱 سعر الصرف المعتمد: 1 USD = ${formatIQD(w.rate)}\nسيظهر مبلغ التحويل النهائي قبل التأكيد.`,keyboard(...rows),messageId);
 }
 export async function topupMethods(db,env,uid,quote,messageId=null){
-  const instructions=await getSetting(db,'topup_instructions','');
-  const rows=[];
-  for(const method of PAY_METHODS){
-    if(await receiverFor(db,env,method))rows.push([button('💳 '+moneyMethods[method],`topup_method:${method}:${quote.quoteKey}`,'success')]);
-  }
-  rows.push([button('↩️ رجوع إلى المبالغ','topup','danger')]);
-  const text=`💳 اختيار طريقة الشحن\n\n💰 المبلغ المطلوب: ${formatQuote(quote)}\n\n${rows.length===1?'⚠️ لا توجد طرق شحن مهيأة حالياً. أضف أرقام/حسابات الاستلام من لوحة الإدارة.':'اختر طريقة التحويل من الخيارات المتاحة.'}${instructions?'\n\n'+short(instructions,900):''}`;
-  return transientText(env,uid,text,keyboard(...rows),messageId);
+ const [instructions,methods]=await Promise.all([getSetting(db,'topup_instructions',''),methodList(db,env,{activeOnly:true})]);
+ const lang=languageOf(env);
+ const rows=methods.map(m=>[paymentButton(m,lang,`topup_method:${m.method_key}:${quote.quoteKey}`)]);
+ rows.push([button('↩️ رجوع إلى المبالغ','topup','danger')]);
+ const text=`💳 اختيار طريقة الشحن\n\n💰 المبلغ المطلوب: ${formatQuote(quote)}\n\n${methods.length?'اختر طريقة التحويل من الخيارات المتاحة.':'⚠️ لا توجد طرق شحن مهيأة حالياً.'}${instructions?'\n\n'+short(instructions,900):''}`;
+ return transientText(env,uid,text,keyboard(...rows),messageId);
 }
 export async function topupEvidence(db,env,uid,quote,method,messageId=null){
-  const receiver=await receiverFor(db,env,method);
-  const instructions=await getSetting(db,'topup_instructions','');
-  return transientText(env,uid,`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`,keyboard([button('↩️ إلغاء الطلب','topup_cancel','danger')]),messageId,{entities:boldEntities(`💳 شحن المحفظة عبر ${moneyMethods[method]}\n\n💰 المبلغ: ${formatQuote(quote)}\n🏦 بيانات الاستلام من الإدارة:\n${short(receiver,700)}\n\n📸 أرسل الآن *رقم التحويل* أو *صورة إثبات الحوالة*.\nستظهر شاشة مراجعة نهائية قبل رفع الطلب للمدير.\n\n⚠️ لا تعتمد على الإيصال وحده؛ المدير يتحقق من وصول المبلغ فعلياً.${instructions?'\n\n'+short(instructions,800):''}`),preserveText:true});
+ const [m,instructions]=await Promise.all([paymentMethod(db,env,method),getSetting(db,'topup_instructions','')]);
+ if(!m?.enabled||!m.visible||!m.receiver?.trim())return transientText(env,uid,'هذه الوسيلة غير متاحة حالياً.',keyboard(backRow()),messageId);
+ const lang=languageOf(env),name=paymentName(m,lang);
+ const receiver=lang==='en'&&m.receiver_en?.trim()?m.receiver_en:m.receiver;
+ const title=lang==='en'?'💳 Wallet top-up via ':'💳 شحن المحفظة عبر ';
+ const body=lang==='en'?'🏦 Receiving details:':'🏦 بيانات الاستلام من الإدارة:';
+ const footer=lang==='en'?'📸 Send the transfer reference or a payment-proof photo. An administrator will verify receipt before crediting your wallet.':'📸 أرسل الآن رقم التحويل أو صورة إثبات الحوالة. سيتحقق المدير من وصول المبلغ قبل إضافته للمحفظة.';
+ const plain=`${title}${name}\n\n💰 ${lang==='en'?'Amount':'المبلغ'}: ${formatQuote(quote)}\n${body}\n${short(receiver,620)}\n\n${footer}${instructions?'\n\n'+short(instructions,500):''}`;
+ const bold=[{type:'bold',offset:0,length:plain.length}];
+ const raw=lang==='en'&&m.receiver_en?.trim()?m.receiver_entities_en:m.receiver_entities_ar;
+ let emoji=[];
+ try{emoji=JSON.parse(raw||'[]').filter(e=>e.type==='custom_emoji'&&e.offset>=0&&e.length>0&&e.offset+e.length<=receiver.length).map(e=>({...e,offset:e.offset+plain.indexOf(receiver)}));}catch{}
+ const options={entities:[...bold,...emoji],preserveText:true};
+ const markup=keyboard([button('↩️ إلغاء الطلب','topup_cancel','danger')]);
+ if(m.photo_file_id){
+  const sent=await sendPhotoCard(env,uid,m.photo_file_id,plain,markup,{messageId,entities:options.entities,preserveText:true,onMessage:msg=>env.__trackTransient?.(uid,msg)});
+  return sent;
+ }
+ return transientText(env,uid,plain,markup,messageId,options);
 }
 export async function topupConfirm(db,env,uid,payload,messageId=null){
+  const selected=await paymentMethod(db,env,payload.method);
+  const methodLabel=selected?paymentName(selected,languageOf(env)):(moneyMethods[payload.method]||payload.method);
   return transientText(env,uid,`📋 مراجعة طلب شحن المحفظة
 
 💰 المبلغ: ${formatQuote(payload)}
-💳 وسيلة الدفع: ${moneyMethods[payload.method]}
+💳 وسيلة الدفع: ${methodLabel}
 🔢 رقم العملية: ${short(payload.reference||'غير متوفر',160)}
 📸 إثبات التحويل: ${payload.proofFileId?'✅ مرفق':'غير مرفق'}
 
