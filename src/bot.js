@@ -16,6 +16,7 @@ import {readPurchaseViewIds,cleanupPurchaseViews,trackPurchaseView} from './purc
 import {boldEntities} from './v25-format.js';
 import {paymentMethod,paymentName} from './payment-methods.js';
 import {paymentQuote,transferSummary} from './payment-quote.js';
+import {trackTopupView,cleanTopupViews} from './topup-cleanup.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 
@@ -115,6 +116,7 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     return ui.topupMethods(db,env,uid,extended);
   }
   if(session.action==='topup_evidence'||session.action==='topup_confirm'){
+    await trackTopupView(db,uid,message.message_id);
     if(!t || t.length>180 || t==='/skip')return sendText(env,uid,'أرسل رقم حوالة صحيحاً لا يتجاوز 180 حرفاً، أو أرفق صورة إيصال.');
     if(t==='-')return sendText(env,uid,'إذا لم يكن لديك رقم حوالة، أرسل صورة إثبات التحويل بدلاً منه.');
     const payload={...session.payload,reference:t,nonce:session.payload.nonce||crypto.randomUUID()};
@@ -219,6 +221,7 @@ async function handleMessage(db,env,ctx,message){
     if(session.action.startsWith('owner_') && await handleAdminText(db,env,uid,session,message))return;
     if(session.action==='owner_support_reply' && await handleSupportReply(db,env,uid,session,message))return;
     if(message.photo?.length && (session.action==='topup_evidence'||session.action==='topup_confirm')) {
+      await trackTopupView(db,uid,message.message_id);
       const pic=message.photo.at(-1);
       const payload={...session.payload,proofFileId:pic.file_id,proofUniqueId:pic.file_unique_id,nonce:session.payload.nonce||crypto.randomUUID()};
       await setSession(db,uid,'topup_confirm',payload);
@@ -534,6 +537,7 @@ async function handleCallback(db,env,ctx,q){
     return ui.currencyMenu(db,env,uid,q.message?.message_id);
   }
   if(data==='topup'){
+    await trackTopupView(db,uid,q.message?.message_id);
     if(!await isTopupEnabled(db,env))return sendText(env,uid,'⏳ طلبات شحن المحفظة لم تُفعّل بعد. يمكنك التواصل مع الدعم.',keyboard([button('💳 المحفظة','wallet','primary')],backRow()));
     return ui.topupPresets(db,env,uid,q.message?.message_id);
   }
@@ -548,12 +552,17 @@ async function handleCallback(db,env,ctx,q){
     return answerCallback(env,q.id,ok?transferSummary(session.payload):'انتهت هذه الخطوة. ابدأ طلباً جديداً.');
   }
   if(data==='topup_cancel'){
+    await trackTopupView(db,uid,q.message?.message_id);
     await clearSession(db,uid);
-    return ui.wallet(db,env,uid,q.message?.message_id);
+    // Send a fresh clean wallet message, then remove only tracked top-up screens.
+    const result=await ui.wallet(db,env,uid);
+    await cleanTopupViews(db,env,uid);
+    return result;
   }
   if(/^(?:topup_preset:|topup_custom$|topup_method:|topup_submit:)/.test(data) && !await isTopupEnabled(db,env))
     return sendText(env,uid,'⛔ أوقفت الإدارة استقبال طلبات الشحن حالياً.');
   if(data.startsWith('topup_preset:')){
+    await trackTopupView(db,uid,q.message?.message_id);
     const [,rawUsd,displayedCurrency]=data.split(':');
     const usd=positiveInt(rawUsd);
     if(!USD_PRESETS.includes(usd)||!['IQD','USD'].includes(displayedCurrency))return;
@@ -566,11 +575,13 @@ async function handleCallback(db,env,ctx,q){
     return ui.topupMethods(db,env,uid,extended,q.message?.message_id);
   }
   if(data==='topup_custom'){
+    await trackTopupView(db,uid,q.message?.message_id);
     const w=await ui.walletSummary(db,uid);
     await setSession(db,uid,'topup_custom',{currency:w.currency});
     return sendText(env,uid,`✏️ أدخل المبلغ المخصص بعملة ${w.currency}\n\n${w.currency==='USD'?'مثال: 25.50':'مثال: 25000'}\nللإلغاء: /cancel`);
   }
   if(data.startsWith('topup_method:')){
+    await trackTopupView(db,uid,q.message?.message_id);
     const [,method,quoteKey]=data.split(':');
     const session=await getSession(db,uid);
     if(!session || session.action!=='topup_choose_method' || session.payload.quoteKey!==quoteKey)return sendText(env,uid,'انتهت هذه الخطوة. افتح شحن المحفظة وحدد المبلغ أولاً.');
@@ -687,6 +698,7 @@ export async function processUpdate(db,env,ctx,update){
   // source type only for this update to avoid a failing Telegram API round trip.
   const source=update.callback_query?.message;
   env={...env,__knownUser:knownUser,__locale:locale,__trackTransient:(id,message)=>ctx.waitUntil(trackPurchaseView(db,id,message)),
+    __trackTopup:(id,message)=>trackTopupView(db,id,message),
     __callback_message_id:source?.message_id??null,
     __callback_media:!!(source?.photo?.length||source?.video||source?.animation||source?.document)};
   if(update.pre_checkout_query) await telegram(env,'answerPreCheckoutQuery',{pre_checkout_query_id:update.pre_checkout_query.id,ok:false,error_message:'تم إيقاف نظام النجوم للطلبات الجديدة. تواصل مع الدعم بشأن الطلبات السابقة.'});

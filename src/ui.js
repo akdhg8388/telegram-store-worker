@@ -19,6 +19,7 @@ import {isMaintenanceButtonEnabled} from './maintenance.js';
 async function transientText(env,uid,text,markup,messageId=null,options={}){
   const sent=await sendOrEditText(env,uid,text,markup,messageId,options);
   if(sent)env.__trackTransient?.(uid,sent);
+  if(sent)await env.__trackTopup?.(uid,sent);
   return sent;
 }
 export async function home(db,env,uid,messageId=null) {
@@ -276,7 +277,7 @@ export async function topupEvidence(db,env,uid,quote,method,messageId=null){
          'topup_amount_info:'+quote.quoteKey,'success')]]:[]),
    [button('↩️ إلغاء الطلب','topup_cancel','danger')]);
  if(m.photo_file_id){
-  const sent=await sendPhotoCard(env,uid,m.photo_file_id,plain,markup,{messageId,entities:options.entities,preserveText:true,onMessage:msg=>env.__trackTransient?.(uid,msg)});
+  const sent=await sendPhotoCard(env,uid,m.photo_file_id,plain,markup,{messageId,entities:options.entities,preserveText:true,onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg)}});
   return sent;
  }
  return transientText(env,uid,plain,markup,messageId,options);
