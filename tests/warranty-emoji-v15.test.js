@@ -96,10 +96,10 @@ test('admin can enable yes/no/hidden policy and edit bilingual notes; customer s
     await beginPurchase(db,env,101,conn.prepare('SELECT * FROM products WHERE id=1').get(),()=> 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
     assert.match(calls.at(-1).body.text,/يوجد ضمان/);
     await productView(db,{...env,__locale:'en'},102,1);
-    assert.match(calls.at(-1).body.text,/Warranty: Warranty included/);
-    assert.match(calls.at(-1).body.text,/30-day warranty/);
+    assert.match(calls.at(-1).body.text,/يوجد ضمان/);
+    assert.match(calls.at(-1).body.text,/ضمان 30 يوم/);
     await beginPurchase(db,{...env,__locale:'en'},102,conn.prepare('SELECT * FROM products WHERE id=1').get(),()=> 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeef');
-    assert.match(calls.at(-1).body.text,/Warranty: Warranty included/);
+    assert.match(calls.at(-1).body.text,/يوجد ضمان/);
     const record=await commitPurchase(db,env,101,'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
     assert.ok(record.id);
     const sale=conn.prepare('SELECT * FROM wallet_purchases WHERE id=?').get(record.id);
@@ -125,8 +125,8 @@ test('warranty cannot be toggled by a non-admin callback; English no-warranty is
     assert.equal(conn.prepare('SELECT warranty_visible FROM products WHERE id=1').get().warranty_visible,0);
     await handleAdminCallback(db,env,991,'admin_product_warranty_set:1:no',12);
     await beginPurchase(db,{...env,__locale:'en'},102,conn.prepare('SELECT * FROM products WHERE id=1').get());
-    assert.match(calls.at(-1).body.text,/Warranty: No warranty/);
-    assert.doesNotMatch(calls.at(-1).body.text,/ضمان/);
+    assert.match(calls.at(-1).body.text,/لا يوجد ضمان/);
+    assert.match(calls.at(-1).body.text,/الضمان: لا يوجد ضمان/);
   })}finally{conn.close()}
 });
 

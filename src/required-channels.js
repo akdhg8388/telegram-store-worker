@@ -45,15 +45,15 @@ export async function manageChannels(db,env,uid,messageId=null){
 export async function channelDetail(db,env,uid,id,messageId){
  const c=await db.prepare('SELECT * FROM required_channels WHERE id=?').bind(id).first();
  if(!c)return manageChannels(db,env,uid,messageId);
- const text='📢 '+c.title_ar+'\nEnglish: '+(c.title_en||'—')+'\nالمعرف: '+c.chat_id+'\nالرابط: '+c.join_url+'\nالحالة: '+(c.active?'ظاهر':'معطل');
- return sendOrEditText(env,uid,text,keyboard([button('✏️ تعديل الاسم العربي','required_edit:'+id+':ar')],[button('✏️ Edit English Name','required_edit:'+id+':en')],[button(c.active?'🙈 إيقاف القناة':'👁️ تفعيل القناة','required_active:'+id,c.active?'danger':'success')],[button('🗑️ حذف القناة','required_delete:'+id,'danger')],[button('↩️ إدارة القنوات','required_manage')]),messageId);
+ const text='📢 '+c.title_ar+'\nالمعرف: '+c.chat_id+'\nالرابط: '+c.join_url+'\nالحالة: '+(c.active?'ظاهر':'معطل');
+ return sendOrEditText(env,uid,text,keyboard([button('✏️ تعديل الاسم العربي','required_edit:'+id+':ar')],[button(c.active?'🙈 إيقاف القناة':'👁️ تفعيل القناة','required_active:'+id,c.active?'danger':'success')],[button('🗑️ حذف القناة','required_delete:'+id,'danger')],[button('↩️ إدارة القنوات','required_manage')]),messageId);
 }
 export async function handleChannelAdmin(db,env,uid,data,messageId=null){
  if(!/^required_(?:manage|add|toggle|detail:\d+|active:\d+|delete:\d+|delete_confirm:\d+|edit:\d+:(?:ar|en))$/.test(data))return false;
  if(!isAdmin(env,uid))return true;
  if(data==='required_manage'){await manageChannels(db,env,uid,messageId);return true;}
  if(data==='required_add'){await setSession(db,uid,'owner_required_add');
-   await sendText(env,uid,'📢 أرسل:\nاسم القناة بالعربي | English name | @username أو -100ID | رابط الانضمام\n\nيمكن ترك الرابط الأخير فارغاً للقناة العامة. للقناة الخاصة اكتب رابط https://t.me/+...\nاجعل البوت مشرفاً بالقناة. للإلغاء /cancel.');return true;}
+   await sendText(env,uid,'📢 أرسل:\nاسم القناة بالعربي | @username أو -100ID | رابط الانضمام\n\nيمكن ترك الرابط الأخير فارغاً للقناة العامة. للقناة الخاصة اكتب رابط https://t.me/+...\nاجعل البوت مشرفاً بالقناة. للإلغاء /cancel.');return true;}
  if(data==='required_toggle'){
    const current=await getSetting(db,'required_channels_enabled','false');
    if(current!=='true'){
@@ -79,7 +79,7 @@ export async function handleChannelAdminText(db,env,uid,session,message){
  if(!isAdmin(env,uid))return false;
  const input=String(message.text||'').trim();
  if(session.action==='owner_required_add'){
-   const p=input.split('|').map(x=>x.trim());if(p.length!==4){await sendText(env,uid,'❌ اكتب: الاسم العربي | English name | معرف القناة | الرابط');return true;}
+   const p=input.split('|').map(x=>x.trim());if(![3,4].includes(p.length)){await sendText(env,uid,'❌ اكتب: الاسم العربي | معرف القناة | الرابط');return true;}
    const [ar,en,raw,url]=p;const id=normalize(raw);const join=linkFor(id,url);
    if(!ar||ar.length>70||en.length>70||!validId(id)||!validUrl(join)){await sendText(env,uid,'❌ تحقق من الاسم والمعرف ورابط https://t.me.');return true;}
    if(await db.prepare('SELECT id FROM required_channels WHERE chat_id=?').bind(id).first()){await sendText(env,uid,'⚠️ هذه القناة موجودة.');return true;}

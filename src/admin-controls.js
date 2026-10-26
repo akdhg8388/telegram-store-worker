@@ -1,4 +1,5 @@
 import {categoryButton,parseCategoryEmoji} from './category-emoji.js';
+import {methodList,paymentMethod,paymentName,paymentButton,extractPaymentEmoji,paymentEntities} from './payment-methods.js';
 import {parseInventoryLines,readInventoryFile} from './inventory-import.js';
 import {button,keyboard,short,formatStars,formatIQD,positiveInt,isAdmin} from './common.js';
 import {sendText,sendOrEditText,telegram} from './telegram.js';
@@ -29,7 +30,7 @@ async function isStaticCustomEmoji(env,id){
 
 
 export function adminRoute(data){
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -47,21 +48,19 @@ async function homeButtonList(db,env,uid,page=0,messageId=null){
   if(nav.length)rows.push(nav);
   rows.push([button('↩️ استعادة جميع أسماء ورموز الرئيسية','admin_home_reset_all','danger')]);
   rows.push([button('👁️ معاينة الرئيسية','admin_visual_preview','success')],[button('🎨 تخصيص الواجهة','admin_visuals')],adminBack);
-  return sendOrEditText(env,uid,'🎨 تخصيص أزرار الرئيسية\n\nاختر الزر لتعديل اسمه بالعربي والإنجليزي ورمزه المتحرك، بدون تغيير وظيفته.',keyboard(...rows),messageId);
+  return sendOrEditText(env,uid,'🎨 تخصيص أزرار الرئيسية\n\nاختر الزر لتعديل اسمه بالعربي ورمزه المتحرك، بدون تغيير وظيفته.',keyboard(...rows),messageId);
 }
 async function homeButtonDetail(db,env,uid,key,messageId=null){
   const def=HOME_BUTTONS.find(x=>x.id===key);
   if(!def)return;
   const visual=await loadVisualSettings(db);
   const ar=resolvedHomeButton(visual,key,'ar');
-  const en=resolvedHomeButton(visual,key,'en');
   const visible=visual[homeSettingKey(key,'visible')]!=='false';
-  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n🇬🇧 English: ${en.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n👁️ الحالة: ${visible?'ظاهر':'مخفي'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
+  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n👁️ الحالة: ${visible?'ظاهر':'مخفي'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
     [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
-    [button('✏️ Edit English label',`admin_setting_edit:${homeSettingKey(key,'label_en')}`)],
     [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
     [button('🌈 تغيير لون الزر',`admin_home_button_color:${key}:primary`,'primary')],
-    ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)],[button('📝 Edit English Description',`admin_setting_edit:${homeSettingKey(key,'description_en')}`)]]:[]),
+    ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)]]:[]),
     [button(visible?'🙈 إخفاء هذا الزر':'👁️ إظهار هذا الزر',`admin_home_button_toggle:${key}`,visible?'danger':'success')],
     [button('↩️ استعادة هذا الزر للأصل',`admin_home_button_reset:${key}`,'danger')],
     [button('🎨 قائمة أزرار الرئيسية','admin_home_buttons:0')],adminBack),messageId);
@@ -89,7 +88,7 @@ async function stats(db,env,uid,messageId=null){
 
 async function settings(db,env,uid,page=0,messageId=null){
   const reply=(text,markup)=>sendOrEditText(env,uid,text,markup,messageId);
-  const entries=Object.entries(SETTING_FIELDS).filter(([key,def])=>!def.internal && !key.startsWith('home_button_') && !['product_custom_emoji_id','price_custom_emoji_id','stock_custom_emoji_id'].includes(key));
+  const entries=Object.entries(SETTING_FIELDS).filter(([key,def])=>!def.internal && !key.startsWith('home_button_') && !key.endsWith('_en') && !['product_custom_emoji_id','price_custom_emoji_id','stock_custom_emoji_id'].includes(key));
   const pageSize=6, offset=Math.max(0,Math.min(page,Math.ceil(entries.length/pageSize)-1))*pageSize;
   const rows=entries.slice(offset,offset+pageSize).map(([key,def])=>[button(def.label,`admin_setting:${key}`)]);
   const nav=[];
@@ -159,7 +158,7 @@ async function productDetail(db,env,uid,id,messageId=null){
   const p=await db.prepare('SELECT p.*,c.title category_title FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=?').bind(id).first();
   if(!p)return reply('المنتج غير موجود.',keyboard(adminBack));
   const rows=[];
-  for(const fields of [['title','description'],['title_en','description_en'],['price_iqd','stock'],['duration_months','usage_instructions'],['usage_instructions_en'],['delivery_shared_text','delivery_instructions']])
+  for(const fields of [['title','description'],['price_iqd','stock'],['duration_months','usage_instructions'],['delivery_shared_text','delivery_instructions']])
     rows.push(fields.map(f=>button(PRODUCT_FIELDS[f].label,`admin_product_field:${id}:${f}`)));
   rows.push([button('✨ رمز متحرك خاص بهذا المنتج',`admin_product_icon:${id}`,'primary')]);
   rows.push([button('🛡️ حالة الضمان: '+(p.warranty_visible?(p.warranty_available?'يوجد ضمان':'لا يوجد ضمان'):'مخفي'),`admin_product_warranty:${id}`,'primary')]);
@@ -171,7 +170,7 @@ async function productDetail(db,env,uid,id,messageId=null){
              button(p.featured?'⭐ إلغاء التمييز':'🌟 تمييز المنتج',`admin_product_toggle:${id}:featured`)]);
   rows.push(backTo('admin_products:0'),adminBack);
   const codes=await db.prepare('SELECT COUNT(*) n FROM product_delivery_items WHERE product_id=? AND used_by_purchase_id IS NULL').bind(id).first();
-  return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 سعر المحفظة: ${p.price_iqd?formatIQD(p.price_iqd):'لم يحدد'}\n📷 الصورة: ${p.photo_file_id?'✅ محفوظة':'—'}\n✨ رمز المنتج: ${p.custom_emoji_id?'✅ مخصص':'الرمز العام'}\n📖 طريقة الاستخدام: ${short(p.usage_instructions||'لم تضف',100)}\n🇬🇧 English product name: ${short(p.title_en||'—',100)}\n📦 طريقة التسليم: ${p.fulfillment_mode}\n🔑 أكواد غير مستخدمة: ${codes?.n||0}\n📦 المحتوى الثابت: ${p.delivery_shared_text?'✅ محفوظ':'—'}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n🛡️ الضمان: ${p.warranty_visible?(p.warranty_available?'يوجد ضمان':'لا يوجد ضمان'):'مخفي'}\n📋 تفاصيل الضمان: ${short(p.warranty_terms_ar||'—',140)}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
+  return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 سعر المحفظة: ${p.price_iqd?formatIQD(p.price_iqd):'لم يحدد'}\n📷 الصورة: ${p.photo_file_id?'✅ محفوظة':'—'}\n✨ رمز المنتج: ${p.custom_emoji_id?'✅ مخصص':'الرمز العام'}\n📖 طريقة الاستخدام: ${short(p.usage_instructions||'لم تضف',100)}\n📦 طريقة التسليم: ${p.fulfillment_mode}\n🔑 أكواد غير مستخدمة: ${codes?.n||0}\n📦 المحتوى الثابت: ${p.delivery_shared_text?'✅ محفوظ':'—'}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n🛡️ الضمان: ${p.warranty_visible?(p.warranty_available?'يوجد ضمان':'لا يوجد ضمان'):'مخفي'}\n📋 تفاصيل الضمان: ${short(p.warranty_terms_ar||'—',140)}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
 }
 async function warrantyMenu(db,env,uid,id,messageId=null){
   const p=await db.prepare('SELECT id,title,warranty_visible,warranty_available,warranty_terms_ar,warranty_terms_en FROM products WHERE id=?').bind(id).first();
@@ -189,7 +188,6 @@ async function warrantyMenu(db,env,uid,id,messageId=null){
     [button(choice(env,'❌ لا يوجد ضمان','❌ No warranty'),`admin_product_warranty_set:${id}:no`,'danger')],
     [button(choice(env,'🙈 إخفاء حقل الضمان','🙈 Hide warranty field'),`admin_product_warranty_set:${id}:hidden`)],
     [button(choice(env,'✏️ تفاصيل الضمان بالعربي','✏️ Arabic warranty terms'),`admin_product_field:${id}:warranty_terms_ar`)],
-    [button('✏️ English warranty details',`admin_product_field:${id}:warranty_terms_en`)],
     [button(choice(env,'⬅️ المنتج','⬅️ Product'),`admin_product:${id}`)],adminBack),messageId,{preserveText:en});
 }
 async function categories(db,env,uid,messageId=null){
@@ -205,7 +203,6 @@ async function categoryDetail(db,env,uid,id,messageId=null){
   if(!c)return reply('القسم غير موجود.',keyboard(adminBack));
   return reply(`📂 القسم #${c.id}\n\n${c.emoji} ${c.title}\nالحالة: ${c.active?'ظاهر':'مخفي'}`,keyboard(
     [button('✏️ تعديل الاسم',`admin_category_field:${id}:title`),button('🎨 تغيير الرمز',`admin_category_field:${id}:emoji`)],
-    [button('🇬🇧 English category name',`admin_category_field:${id}:title_en`)],
     [button(c.active?'🚫 إخفاء':'✅ إظهار',`admin_category_toggle:${id}`,c.active?'danger':'success')],backTo('admin_manage_categories'),adminBack));
 }
 async function userLookup(db,env,uid,input,messageId=null){
@@ -234,21 +231,17 @@ async function userLookup(db,env,uid,input,messageId=null){
 async function topupSetup(db,env,uid,messageId=null){
   const rate=await usdRate(db);
   const enabled=(await getSetting(db,'manual_topups_enabled',env.ENABLE_MANUAL_TOPUPS||'false'))==='true';
-  const methods=[
-    ['zain_balance','📱 رصيد زين','zain_balance_receiver'],
-    ['superqi','🏦 سوبر كي','superqi_receiver'],
-    ['binance','🟡 Binance','binance_receiver']
-  ];
-  const receivers=await Promise.all(methods.map(async ([method,label])=>({method,label,ready:!!(await receiverFor(db,env,method))})));
-  const count=receivers.filter(m=>m.ready).length;
+  const methods=await methodList(db,env);
+  const count=methods.filter(m=>m.enabled&&m.visible&&m.receiver?.trim()).length;
   const status=enabled?'🟢 تعمل وتستقبل طلبات الشحن':'🔴 متوقفة عن استقبال طلبات الشحن';
   const checklist=`${rate?'✅':'❌'} سعر الصرف: ${rate?'1 USD = '+formatIQD(rate):'لم يُحدد'}\n`+
-    `${count?'✅':'❌'} حسابات الاستلام المضبوطة: ${count} من ${methods.length}\n`+
+    `${count?'✅':'❌'} حسابات الاستلام النشطة: ${count} من ${methods.length}\n`+
     `${enabled?'✅':'⏳'} تفعيل استقبال الطلبات`;
   const rows=[
     [button('💱 تعديل سعر الصرف','admin_setting_edit:usd_rate_iqd','primary')],
     ...(!rate?[[button('✅ اعتماد 1 دولار = 1,520 د.ع','admin_rate_1520','success')]]:[]),
-    ...methods.map(([,label,key],i)=>[button((receivers[i].ready?'✅ ':'➕ ')+label,`admin_setting_edit:${key}`,'primary')]),
+    ...methods.map(m=>[paymentButton(m,'ar',`admin_pay:${m.method_key}`)]),
+    [button('➕ إضافة وسيلة دفع جديدة','admin_pay_add','success')],
     [button(enabled?'⏸️ تعطيل طلبات الشحن':'✅ تفعيل طلبات الشحن','admin_toggle_topups',enabled?'danger':'success')],
     [button('📥 مراجعة طلبات الشحن','admin_topups','primary')],
     [button('🛡️ لوحة المدير','admin','primary')]
@@ -323,7 +316,6 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     [button('🖼️ تعريف البوت قبل ابدأ','admin_bot_intro','primary')],
     [button('👥 عداد المستخدمين','admin_counter','primary')],
     [button('👋 تعديل رسالة الترحيب','admin_setting:home_template','primary')],
-    [button('👋 English welcome message','admin_setting:home_template_en','primary')],
     [button('🎨 تخصيص جميع أزرار الرئيسية','admin_home_buttons:0','success')],
     [button('🛍️ رموز المنتج والسعر والمخزون','admin_product_icons','success')],
     [button('↩️ إعادة رسالة الترحيب الأصلية','admin_visual_reset','danger')],
@@ -409,7 +401,6 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await sendOrEditText(env,uid,`🛠️ وضع الصيانة\n\nالحالة: ${active?'🔴 مفعّل':'🟢 المتجر يعمل'}\nعند التفعيل تتوقف واجهات العملاء مؤقتاً مع استمرار لوحة المدير وإمكانية إدارة الطلبات القديمة. لا يُحذف أي رصيد أو طلب.`,keyboard(
       [button(active?'✅ إنهاء الصيانة':'🛠️ بدء الصيانة','admin_maintenance_toggle',active?'success':'danger')],
       [button('📝 رسالة الصيانة العربية','admin_setting_edit:maintenance_message_ar','primary')],
-      [button('📝 English maintenance notice','admin_setting_edit:maintenance_message_en','primary')],
       adminBack),messageId);
   }
   else if(data==='admin_maintenance_toggle'){
@@ -419,6 +410,37 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await handleAdminCallback(db,env,uid,'admin_maintenance',messageId);
   }
   else if(data==='admin_topup_setup')await topupSetup(db,env,uid,messageId);
+  else if(data==='admin_pay_add'){
+    await setSession(db,uid,'owner_pay_add');
+    await sendText(env,uid,'➕ أرسل اسم وسيلة الدفع الجديدة بالعربية، ويمكنك وضع رمز متحرك مع الاسم. الحد الأقصى 65 حرفاً. للإلغاء /cancel.');
+  }
+  else if(data.startsWith('admin_pay:')){
+    const key=data.split(':')[1],m=await paymentMethod(db,env,key);
+    if(!m)return sendText(env,uid,'هذه الوسيلة غير موجودة.');
+    await sendOrEditText(env,uid,`💳 وسيلة الدفع: ${m.name_ar}\n📝 بيانات الاستلام: ${m.receiver?'✅ محفوظة':'غير مضافة'}\n📷 الصورة: ${m.photo_file_id?'✅ موجودة':'غير مضافة'}\n✅ مفعلة: ${m.enabled?'نعم':'لا'}\n👁️ ظاهرة: ${m.visible?'نعم':'لا'}`,keyboard(
+      [button('✏️ تعديل الاسم العربي',`admin_pay_edit:${key}:ar`)],
+      [button('📝 بيانات الاستلام عربي',`admin_pay_edit:${key}:receiver`)],
+      [button('📷 إضافة / تغيير الصورة',`admin_pay_edit:${key}:photo`)],
+      [button('🗑️ حذف صورة الاستلام',`admin_pay_photo_delete:${key}`,'danger')],
+      [button(m.enabled?'⏸️ تعطيل الوسيلة':'✅ تفعيل الوسيلة',`admin_pay_toggle:${key}:enabled`,m.enabled?'danger':'success')],
+      [button(m.visible?'🙈 إخفاء الوسيلة':'👁️ إظهار الوسيلة',`admin_pay_toggle:${key}:visible`)],
+      [button('↩️ إعداد شحن المحفظة','admin_topup_setup')]),messageId);
+  }
+  else if(data.startsWith('admin_pay_edit:')){
+    const [,key,field]=data.split(':');
+    if(!['ar','receiver','photo'].includes(field)||!await paymentMethod(db,env,key))return true;
+    await setSession(db,uid,'owner_pay_edit',{key,field});
+    await sendText(env,uid,field==='photo'?'📷 أرسل صورة Telegram لبيانات الاستلام.':field.startsWith('receiver')?'📝 أرسل تفاصيل الاستلام كنص، ويمكن تضمين الرموز المتحركة (حتى 800 حرف).':'🏷️ أرسل الاسم الجديد (حتى 65 حرفاً)، ويمكن إضافة رمز متحرك. للإلغاء /cancel.');
+  }
+  else if(data.startsWith('admin_pay_photo_delete:')){
+    const key=data.split(':')[1];await db.prepare('UPDATE payment_methods SET photo_file_id=NULL WHERE method_key=?').bind(key).run();
+    await handleAdminCallback(db,env,uid,'admin_pay:'+key,messageId);
+  }
+  else if(data.startsWith('admin_pay_toggle:')){
+    const [,key,field]=data.split(':');if(!['enabled','visible'].includes(field))return true;
+    await db.prepare(`UPDATE payment_methods SET ${field}=1-${field} WHERE method_key=?`).bind(key).run();
+    await handleAdminCallback(db,env,uid,'admin_pay:'+key,messageId);
+  }
   else if(data==='admin_rate_1520'){
     // Old callbacks must never overwrite an explicit owner rate.
     if(await usdRate(db)){
@@ -447,7 +469,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     const current=await getSetting(db,'manual_topups_enabled',env.ENABLE_MANUAL_TOPUPS||'false');
     if(current!=='true'){
       const rate=await usdRate(db);
-      const receivers=await Promise.all(['zain_balance','superqi','binance'].map(m=>receiverFor(db,env,m)));
+      const receivers=(await methodList(db,env)).filter(m=>m.enabled&&m.visible).map(m=>m.receiver);
       if(!rate || !receivers.some(Boolean)){
         await sendText(env,uid,'⚠️ لا يمكن تفعيل الشحن بعد: '+(!rate?'حدّد سعر الدولار. ':'')+(!receivers.some(Boolean)?'وأضف رقم أو حساب استلام واحداً على الأقل.':'') ,keyboard([button('⚙️ فتح إعداد الشحن','admin_topup_setup','primary')]));
         return true;
@@ -575,6 +597,38 @@ export async function handleAdminText(db,env,uid,session,message){
   if(!isAdmin(env,uid))return false;
   const originalText=String(message.text??'');
   const text=originalText.trim();
+  if(session.action==='owner_pay_add'){
+    if(!text||text.length>65||text.length<2){await sendText(env,uid,'❌ الاسم يجب أن يكون بين حرفين و65 حرفاً.');return true;}
+    const count=(await db.prepare('SELECT COUNT(*) n FROM payment_methods').first())?.n||0;
+    if(count>=30){await sendText(env,uid,'❌ الحد الأقصى 30 وسيلة دفع.');return true;}
+    const key='custom_'+crypto.randomUUID().replace(/-/g,'').slice(0,20);
+    const emoji=extractPaymentEmoji(message);
+    await db.prepare('INSERT INTO payment_methods(method_key,name_ar,icon_custom_emoji_id,icon_fallback,enabled,visible,sort_order) VALUES (?,?,?,?,0,0,?)')
+      .bind(key,text,emoji.id,emoji.fallback||'💳',100+count).run();
+    await clearSession(db,uid);await audit(db,uid,'add_payment_method','payment_method',0);
+    await sendText(env,uid,'✅ أضيفت الوسيلة. أضف بيانات الاستلام ثم فعّلها وأظهرها.',keyboard([button('💳 إعداد الوسيلة','admin_pay:'+key)]));
+    return true;
+  }
+  if(session.action==='owner_pay_edit'){
+    const {key,field}=session.payload||{};
+    if(!['ar','receiver','photo'].includes(field)||!await paymentMethod(db,env,key))return true;
+    if(field==='photo'){
+      if(!message.photo?.length){await sendText(env,uid,'📷 أرسل صورة Telegram أو /cancel.');return true;}
+      await db.prepare('UPDATE payment_methods SET photo_file_id=? WHERE method_key=?').bind(message.photo.at(-1).file_id,key).run();
+    }else if(field==='ar'||field==='en'){
+      if(!text||text.length>65){await sendText(env,uid,'❌ أرسل اسماً لا يتجاوز 65 حرفاً.');return true;}
+      const emoji=extractPaymentEmoji(message);
+      if(field==='ar')await db.prepare('UPDATE payment_methods SET name_ar=?,icon_custom_emoji_id=?,icon_fallback=? WHERE method_key=?').bind(text,emoji.id,emoji.fallback||'💳',key).run();
+      else await db.prepare('UPDATE payment_methods SET name_en=? WHERE method_key=?').bind(text,key).run();
+    }else{
+      if(!text||text.length>800){await sendText(env,uid,'❌ بيانات الاستلام يجب أن تكون 1 إلى 800 حرف.');return true;}
+      const col=field==='receiver'?'receiver_ar':'receiver_en',entities=field==='receiver'?'receiver_entities_ar':'receiver_entities_en';
+      await db.prepare(`UPDATE payment_methods SET ${col}=?,${entities}=? WHERE method_key=?`).bind(text,paymentEntities(text,message),key).run();
+    }
+    await clearSession(db,uid);await audit(db,uid,'edit_payment_method','payment_method',0);
+    await sendText(env,uid,'✅ تم حفظ التعديل.',keyboard([button('💳 إعداد الوسيلة','admin_pay:'+key)]));
+    return true;
+  }
   if(session.action==='owner_product_photo'){
     const id=positiveInt(session.payload?.id);
     if(!id)return true;

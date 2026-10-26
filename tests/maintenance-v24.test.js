@@ -46,7 +46,7 @@ test('V24 bilingual bold maintenance message and animated sticker, fallback text
   assert.deepEqual(calls.map(x=>x.method),['sendSticker','sendMessage']);
   assert.equal(calls[1].body.entities[0].type,'bold');
   assert.equal(calls[1].body.entities[0].length,calls[1].body.text.length);
-  assert.equal(calls[1].body.text,'Wallet temporarily unavailable');
+  assert.match(calls[1].body.text,/الصيانة/);
   assert.ok(calls[1].body.reply_markup.inline_keyboard.flat().some(x=>x.callback_data==='home'));
  });}finally{c.close();}
 });

@@ -28,7 +28,7 @@ test('first four home action buttons are green, remaining blue; admin never appe
     await home(db,env,991);await home(db,env,101);
     const owner=flatten(calls[0]);
     for(const data of ['categories','featured','wallet','profile'])assert.equal(owner.find(b=>b.callback_data===data).style,'success',data);
-    for(const data of ['currency','orders','transactions','referrals','language','support','news','admin'])assert.equal(owner.find(b=>b.callback_data===data).style,'primary',data);
+    for(const data of ['currency','orders','transactions','referrals','my_support_inbox','support','news','admin'])assert.equal(owner.find(b=>b.callback_data===data).style,'primary',data);
     assert.ok(owner.every(b=>b.style==='success'||b.style==='primary'||b.style==='danger'));
     assert.ok(!flatten(calls[1]).some(b=>b.callback_data==='admin'));
  });}finally{conn.close()}

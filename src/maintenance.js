@@ -77,7 +77,7 @@ export async function maintenanceDetail(db,env,uid,id,messageId=null){
  '', 'تظهر رسالة الصيانة بخط عريض كامل عند المستخدم.'];
  return sendOrEditText(env,uid,lines.join('\n'),keyboard(
  [button(active?'✅ إنهاء الصيانة':'🛠️ تشغيل الصيانة','maintenance_toggle:'+id,active?'success':'danger')],
- [button('📝 تعديل النص العربي','maintenance_edit:'+id+':ar','primary'),button('🇬🇧 Edit English','maintenance_edit:'+id+':en','primary')],
+ [button('📝 تعديل النص العربي','maintenance_edit:'+id+':ar','primary')],
  [button('🎞️ إضافة ملصق متحرك','maintenance_sticker:'+id,'primary')],
  [button('🗑️ إزالة الملصق','maintenance_remove_sticker:'+id,'danger')],
  [button('♻️ استعادة النص الافتراضي','maintenance_reset:'+id,'primary')],

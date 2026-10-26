@@ -77,8 +77,8 @@ test('V21 admin visible toggle hides the real home button, English referral page
   await home(db,env,991);
   assert.ok(calls.at(-1).body.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='referrals'));
   await referralPage(db,{...env,__locale:'en'},102);
-  assert.match(calls.at(-1).body.text,/Referral Program/);
-  assert.match(calls.at(-1).body.text,/Reward rate: 5%/);
+  assert.match(calls.at(-1).body.text,/برنامج الإحالات/);
+  assert.match(calls.at(-1).body.text,/نسبة المكافأة: 5%/);
  });}finally{c.close();}
 });
 test('V21 owner can set percentage and unlimited purchase count by Telegram controls',async()=>{
@@ -123,11 +123,11 @@ test('V23 News home button opens the configured channel directly without another
    let news=items.find(x=>x.url==='https://t.me/MyStoreNewsIQ');
    assert.ok(news,'news must be a Telegram URL button');
    assert.equal(news.callback_data,undefined);
-   c.prepare("INSERT INTO bot_settings(key,value) VALUES('home_button_news_label_en','📰 Latest News')").run();
+   c.prepare("INSERT INTO bot_settings(key,value) VALUES('home_button_news_label_en','📢 الأخبار')").run();
    await home(db,{...env,__locale:'en'},101);
    items=calls.at(-1).body.reply_markup.inline_keyboard.flat();
    news=items.find(x=>x.url==='https://t.me/MyStoreNewsIQ');
-   assert.equal(news.text,'📰 Latest News');
+   assert.equal(news.text,'📢 الأخبار');
    c.prepare("INSERT INTO bot_settings(key,value) VALUES('home_button_news_visible','false')").run();
    await home(db,env,101);
    items=calls.at(-1).body.reply_markup.inline_keyboard.flat();
@@ -155,7 +155,7 @@ test('V23 referral URL button shares the personal referral link via Telegram, in
    await referralPage(db,{...env,__locale:'en'},102);
    keyboard=calls.at(-1).body.reply_markup.inline_keyboard.flat();
    share=keyboard.find(x=>x.url?.startsWith('https://t.me/share/url?'));
-   assert.equal(share.text,'🔗 Share Referral Link');
+   assert.equal(share.text,'🔗 مشاركة رابط الإحالة');
    assert.equal(new URL(share.url).searchParams.get('url'),'https://t.me/MyStoreIQBot?start=ref_102');
    await referralPage(db,{...env,BOT_USERNAME:''},102);
    keyboard=calls.at(-1).body.reply_markup.inline_keyboard.flat();

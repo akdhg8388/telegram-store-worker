@@ -41,8 +41,8 @@ test('mandatory channel gate defaults off and enforces every active channel when
    assert.equal(gate.missing.length,1);
    await showGate(db,{...env,__locale:'en'},101,gate);
    const msg=req.at(-1).body;
-   assert.match(msg.text,/Required Subscription/);
-   assert.equal(msg.reply_markup.inline_keyboard[0][0].text,'📢 Channel B');
+   assert.match(msg.text,/الاشتراك الإجباري/);
+   assert.equal(msg.reply_markup.inline_keyboard[0][0].text,'📢 قناة ب');
    assert.equal(msg.reply_markup.inline_keyboard[0][0].url,'https://t.me/Bchannel');
    assert.equal(msg.reply_markup.inline_keyboard.at(-1)[0].callback_data,'required_verify');
   },{'@Achannel':'member'});
@@ -70,8 +70,8 @@ test('wallet labels are bold and values remain normal in both languages',async()
   assert.ok(x.text.includes('بعد مراجعة الإدارة'));
   await wallet(db,{...env,__locale:'en'},101);
   x=requests.at(-1).body;
-  assert.ok(x.text.includes('Your balance:'));
-  assert.ok(x.text.includes('Approved rate:')||x.text.includes('exchange rate'));
-  assert.ok(x.entities.some(e=>x.text.slice(e.offset,e.offset+e.length)==='💰 Your balance:'));
+  assert.ok(x.text.includes('رصيدك:'));
+  assert.ok(x.text.includes('السعر المعتمد:')||x.text.includes('سعر الصرف'));
+  assert.ok(x.entities.some(e=>x.text.slice(e.offset,e.offset+e.length)==='💰 رصيدك:'));
  });}finally{conn.close();}
 });

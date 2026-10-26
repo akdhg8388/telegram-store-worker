@@ -56,7 +56,7 @@ test('owner can rename every action independently in Arabic and English and add 
     const old=flat(calls[0]).find(b=>b.callback_data==='orders');
     const english=flat(calls[1]).find(b=>b.callback_data==='orders');
     assert.equal(old.text,'📦 طلبياتي');
-    assert.equal(english.text,'📦 My Purchases');
+    assert.equal(english.text,'📦 طلبياتي');
     assert.equal(english.icon_custom_emoji_id,'5400000000000000002');
     assert.equal(english.callback_data,'orders');
     assert.ok(!flat(calls[1]).some(b=>b.callback_data==='admin'));
@@ -82,27 +82,17 @@ test('owner can reset one home button without resetting other customization, pre
  }finally{x.conn.close()}
 });
 
-test('real language selector changes persisted user locale and makes main store pages English',async()=>{
- const x=fixture();try{
-  x.conn.prepare("UPDATE users SET language='ar' WHERE tg_id=101").run();
-  await mock(async calls=>{
-    let id=7500;const ctx={waitUntil:()=>{}};
-    for(const data of ['language','language_en','categories','product:1','wallet','orders','profile','language_ar']){
-      await processUpdate(x.db,env,ctx,{update_id:++id,callback_query:{id:'q'+id,from:{id:101,first_name:'John'},message:{chat:{type:'private',id:101},message_id:50},data}});
-      if(data==='language_en'){
-        assert.equal(x.conn.prepare('SELECT language FROM users WHERE tg_id=101').get().language,'en');
-        assert.ok(calls.at(-1).body.text.includes('Welcome'));
-      }
-      if(data==='categories')assert.ok(calls.at(-1).body.text.includes('Store Categories'));
-      if(data==='product:1'){
-        assert.ok(calls.at(-1).body.text.includes('Premium Product'));
-        assert.ok(calls.at(-1).body.text.includes('English description'));
-        assert.ok(calls.at(-1).body.text.includes('Price:'));
-      }
-      if(data==='language_ar')assert.equal(x.conn.prepare('SELECT language FROM users WHERE tg_id=101').get().language,'ar');
-    }
-  });
- }finally{x.conn.close()}
+test('legacy language buttons cannot enable English and Home stays Arabic',async()=>{
+ const x=fixture();try{await mock(async calls=>{
+  await home(x.db,{...env,__locale:'en'},101);
+  const homeButtons=flat(calls.at(-1));
+  assert.equal(homeButtons.some(b=>b.callback_data==='language'),false);
+  assert.ok(homeButtons.some(b=>b.callback_data==='my_support_inbox'));
+  await processUpdate(x.db,env,{waitUntil(){}},{update_id:7501,callback_query:{id:'q7501',from:{id:101,first_name:'John'},message:{chat:{type:'private',id:101},message_id:50},data:'language_en'}});
+  assert.equal(x.conn.prepare('SELECT language FROM users WHERE tg_id=101').get().language,'en'); // historical data unchanged
+  await home(x.db,{...env,__locale:'en'},101);
+  assert.match(calls.at(-1).body.text,/أهلاً بك/);
+ })}finally{x.conn.close()}
 });
 
 test('product, price and stock emoji are included as separate valid Telegram entities; list has product icon',async()=>{
@@ -137,11 +127,9 @@ test('Telegram emoji icon permission error falls back to ordinary button without
  },true);
 });
 
-test('English command descriptions and gateway translation preserve callback ids and payment amounts',()=>{
- assert.equal(CUSTOMER_COMMANDS_EN.length,11);
- assert.equal(OWNER_COMMANDS_EN.at(-1).description,'Owner control panel');
- assert.equal(languageOf({__locale:'en'}),'en');
- assert.match(translateUi('💰 السعر: 50,000 د.ع','en'),/Price: 50,000 IQD/);
+test('Arabic store language is enforced independently of legacy locale',()=>{
+ assert.equal(languageOf({__locale:'en'}),'ar');
+ assert.equal(languageOf({__locale:'ar'}),'ar');
  assert.equal(translateUi('💰 السعر: 50,000 د.ع','ar'),'💰 السعر: 50,000 د.ع');
 });
 
@@ -159,7 +147,7 @@ test('credentials and unique delivery data are not altered by the English locale
     await showReceipt(x.db,{...env,__locale:'en'},101,result.id);
     const receipt=calls.filter(c=>c.method==='sendMessage').at(-1).body.text;
     assert.ok(receipt.includes('المخزون_123 السلام عليكم!!'),'delivery data preserved byte for byte');
-    assert.ok(receipt.includes('Purchase & delivery successful!'));
+    assert.match(receipt,/تم الشراء والتسليم بنجاح/);
     assert.equal(x.conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,4000);
   });
  }finally{x.conn.close()}
@@ -186,20 +174,14 @@ test('V17 moves private messages into Home and can hide or restore any Home entr
  })}finally{x.conn.close()}
 });
 
-test('V17 custom Arabic and English messages descriptions remain private and independent',async()=>{
+test('messages description remains Arabic even with legacy English user preference',async()=>{
  const x=fixture();try{await mock(async calls=>{
-  const ar=homeSettingKey('messages','description_ar');
-  const en=homeSettingKey('messages','description_en');
-  for(const [key,value] of [[ar,'وصف رسائلي الخاص'],[en,'My private support messages']]){
-   await handleAdminCallback(x.db,env,991,'admin_setting_edit:'+key,19);
-   await handleAdminText(x.db,env,991,{action:'owner_setting',payload:{key}},{text:value});
-  }
+  const key=homeSettingKey('messages','description_ar');
+  await handleAdminCallback(x.db,env,991,'admin_setting_edit:'+key,19);
+  await handleAdminText(x.db,env,991,{action:'owner_setting',payload:{key}},{text:'وصف رسائلي الخاص'});
   const {customerInbox}=await import('../src/support.js');
-  await customerInbox(x.db,env,991);
-  assert.match(calls.at(-1).body.text,/وصف رسائلي الخاص/);
   await customerInbox(x.db,{...env,__locale:'en'},991);
-  assert.match(calls.at(-1).body.text,/My private support messages/);
-  assert.doesNotMatch(calls.at(-1).body.text,/وصف رسائلي الخاص/);
+  assert.match(calls.at(-1).body.text,/وصف رسائلي الخاص/);
  })}finally{x.conn.close()}
 });
 
@@ -210,9 +192,9 @@ test('V17 maintenance stops customer messages and callbacks while owner keeps co
   assert.equal(x.conn.prepare("SELECT value FROM bot_settings WHERE key='maintenance_enabled'").get().value,'true');
   let id=90000;const ctx={waitUntil:()=>{}};
   await processUpdate(x.db,env,ctx,{update_id:++id,message:{message_id:130,chat:{id:101,type:'private'},from:{id:101,first_name:'John'},text:'/start'}});
-  assert.match(calls.at(-1).body.text,/maintenance/i);
+  assert.match(calls.at(-1).body.text,/الصيانة/);
   await processUpdate(x.db,env,ctx,{update_id:++id,callback_query:{id:'v17',from:{id:101,first_name:'John'},message:{chat:{id:101,type:'private'},message_id:99},data:'buy:1'}});
-  assert.match(calls.at(-1).body.text,/maintenance/i);
+  assert.match(calls.at(-1).body.text,/الصيانة/);
   await handleAdminCallback(x.db,env,991,'admin_maintenance_toggle',20);
   assert.equal(x.conn.prepare("SELECT value FROM bot_settings WHERE key='maintenance_enabled'").get().value,'false');
   await home(x.db,env,101);

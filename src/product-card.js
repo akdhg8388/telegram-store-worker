@@ -18,9 +18,18 @@ export function splitPhotoCaption(text,entities=[]){
   const cut=cutAt>=450?cutAt+1:995;
   const caption=text.slice(0,cut);
   const remaining=text.slice(cut);
-  const first=entities.filter(e=>e.offset>=0&&e.offset+e.length<=cut);
-  const second=entities.filter(e=>e.offset>=cut&&e.offset+e.length<=text.length)
-    .map(e=>({...e,offset:e.offset-cut}));
+  // Bold spans may cross the 1024-caption boundary; clip each piece safely.
+  // Custom emoji entities must remain intact to preserve Telegram UTF-16 offsets.
+  const first=entities.flatMap(e=>{
+    if(e.offset<0||e.offset>=cut)return [];
+    if(e.offset+e.length<=cut)return [e];
+    return e.type==='bold'?[{...e,length:cut-e.offset}]:[];
+  });
+  const second=entities.flatMap(e=>{
+    if(e.offset+e.length<=cut||e.offset>=text.length)return [];
+    if(e.offset>=cut)return [{...e,offset:e.offset-cut}];
+    return e.type==='bold'?[{...e,offset:0,length:e.offset+e.length-cut}]:[];
+  });
   return {caption,remaining,captionEntities:first,remainingEntities:second};
 }
 export async function sendPhotoCard(env,uid,photo,text,markup,options={}){
