@@ -60,7 +60,7 @@ async function homeButtonDetail(db,env,uid,key,messageId=null){
     [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
     [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
     [button('🌈 تغيير لون الزر',`admin_home_button_color:${key}:primary`,'primary')],
-    ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)]:[]),
+    ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)]]:[]),
     [button(visible?'🙈 إخفاء هذا الزر':'👁️ إظهار هذا الزر',`admin_home_button_toggle:${key}`,visible?'danger':'success')],
     [button('↩️ استعادة هذا الزر للأصل',`admin_home_button_reset:${key}`,'danger')],
     [button('🎨 قائمة أزرار الرئيسية','admin_home_buttons:0')],adminBack),messageId);
