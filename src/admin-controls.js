@@ -1,5 +1,6 @@
 import {categoryButton,parseCategoryEmoji} from './category-emoji.js';
 import {methodList,paymentMethod,paymentName,paymentButton,extractPaymentEmoji,paymentEntities} from './payment-methods.js';
+import {formatTransferMinor,parseTransferFee} from './payment-quote.js';
 import {parseInventoryLines,readInventoryFile} from './inventory-import.js';
 import {button,keyboard,short,formatStars,formatIQD,positiveInt,isAdmin} from './common.js';
 import {sendText,sendOrEditText,telegram} from './telegram.js';
@@ -30,6 +31,7 @@ async function isStaticCustomEmoji(env,id){
 
 
 export function adminRoute(data){
+  if(/^admin_pay_(?:quote:\w+|quote_toggle:\w+|quote_currency:\w+:(?:IQD|USD)|quote_mode:\w+:(?:none|fixed|percent)|quote_edit:\w+)$/.test(data))return true;
   if(/^admin_home_button_color:[a-z_]+(?::(?:default|primary|success|danger))?$/.test(data)
     || /^admin_pay_(?:edit:\w+:icon|icon_delete:\w+)$/.test(data))return true;
   return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
@@ -423,6 +425,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     if(!m)return sendText(env,uid,'هذه الوسيلة غير موجودة.');
     await sendOrEditText(env,uid,`💳 وسيلة الدفع: ${paymentName(m,'ar')}\n✨ الرمز التعبيري: ${m.icon_custom_emoji_id||m.icon_fallback?'✅ مضاف':'غير مضاف'}\n📝 بيانات الاستلام: ${m.receiver?'✅ محفوظة':'غير مضافة'}\n📷 الصورة: ${m.photo_file_id?'✅ موجودة':'غير مضافة'}\n✅ مفعلة: ${m.enabled?'نعم':'لا'}\n👁️ ظاهرة: ${m.visible?'نعم':'لا'}`,keyboard(
       [button('✏️ تعديل الاسم العربي',`admin_pay_edit:${key}:ar`)],
+      [button('🧮 حساب مبلغ التحويل والرسوم',`admin_pay_quote:${key}`,'success')],
       [button('✨ إضافة / تغيير رمز تعبيري',`admin_pay_edit:${key}:icon`)],
       ...(m.icon_custom_emoji_id||m.icon_fallback?[[button('🗑️ إزالة الرمز التعبيري',`admin_pay_icon_delete:${key}`,'danger')]]:[]),
       [button('📝 بيانات الاستلام عربي',`admin_pay_edit:${key}:receiver`)],
@@ -431,6 +434,53 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
       [button(m.enabled?'⏸️ تعطيل الوسيلة':'✅ تفعيل الوسيلة',`admin_pay_toggle:${key}:enabled`,m.enabled?'danger':'success')],
       [button(m.visible?'🙈 إخفاء الوسيلة':'👁️ إظهار الوسيلة',`admin_pay_toggle:${key}:visible`)],
       [button('↩️ إعداد شحن المحفظة','admin_topup_setup')]),messageId);
+  }
+  else if(data.startsWith('admin_pay_quote:')){
+    const key=data.split(':')[1],m=await paymentMethod(db,env,key);
+    if(!m)return true;
+    const currency=m.pay_currency==='USD'?'USD':'IQD',mode=m.fee_mode||'none';
+    const value=mode==='percent'?(Number(m.fee_value||0)/100).toFixed(2)+'%'
+      :formatTransferMinor(Number(m.fee_value||0),currency);
+    const active=m.quote_enabled!==0;
+    await sendOrEditText(env,uid,'🧮 حساب التحويل: '+paymentName(m,'ar')+
+      '\n\nالحالة: '+(active?'✅ مفعّل':'⏸️ متوقف')+
+      '\nعملة الدفع: '+currency+
+      '\nنوع الاستقطاع: '+({none:'بدون رسوم',fixed:'مبلغ ثابت',percent:'نسبة من المبلغ المرسل'}[mode]||'بدون رسوم')+
+      '\nقيمة الاستقطاع: '+value+
+      '\n\nيتحمل العميل الاستقطاع بالكامل. سعر الصرف وقيمة رصيد المحفظة لا يتغيران.',
+      keyboard(
+      [button(active?'⏸️ إيقاف الحساب':'✅ تفعيل الحساب',`admin_pay_quote_toggle:${key}`,active?'danger':'success')],
+      [button('🇮🇶 الدفع بالدينار',`admin_pay_quote_currency:${key}:IQD`),button('🇺🇸 الدفع بالدولار',`admin_pay_quote_currency:${key}:USD`)],
+      [button('✅ بلا رسوم',`admin_pay_quote_mode:${key}:none`)],
+      [button('💰 رسوم ثابتة',`admin_pay_quote_mode:${key}:fixed`),button('📊 نسبة استقطاع',`admin_pay_quote_mode:${key}:percent`)],
+      ...(mode!=='none'?[[button('✏️ تعديل قيمة الرسوم',`admin_pay_quote_edit:${key}`,'primary')]]:[]),
+      [button('↩️ إعداد وسيلة الدفع',`admin_pay:${key}`)]),messageId);
+  }
+  else if(data.startsWith('admin_pay_quote_toggle:')){
+    const key=data.split(':')[1],m=await paymentMethod(db,env,key);if(!m)return true;
+    await db.prepare('UPDATE payment_methods SET quote_enabled=? WHERE method_key=?').bind(m.quote_enabled===0?1:0,key).run();
+    await handleAdminCallback(db,env,uid,'admin_pay_quote:'+key,messageId);
+  }
+  else if(data.startsWith('admin_pay_quote_currency:')){
+    const [,key,currency]=data.split(':'),m=await paymentMethod(db,env,key);
+    if(!m||!['IQD','USD'].includes(currency))return true;
+    await db.prepare('UPDATE payment_methods SET pay_currency=?,fee_value=CASE WHEN fee_mode=? THEN fee_value ELSE 0 END WHERE method_key=?')
+      .bind(currency,'percent',key).run();
+    await handleAdminCallback(db,env,uid,'admin_pay_quote:'+key,messageId);
+  }
+  else if(data.startsWith('admin_pay_quote_mode:')){
+    const [,key,mode]=data.split(':'),m=await paymentMethod(db,env,key);
+    if(!m||!['none','fixed','percent'].includes(mode))return true;
+    await db.prepare('UPDATE payment_methods SET fee_mode=?,fee_value=0 WHERE method_key=?').bind(mode,key).run();
+    await handleAdminCallback(db,env,uid,'admin_pay_quote:'+key,messageId);
+  }
+  else if(data.startsWith('admin_pay_quote_edit:')){
+    const key=data.split(':')[1],m=await paymentMethod(db,env,key);
+    if(!m||m.fee_mode==='none')return true;
+    await setSession(db,uid,'owner_pay_fee',{key});
+    await sendText(env,uid,m.fee_mode==='percent'
+      ?'📊 أرسل نسبة الاستقطاع مثل 10 أو 2.5 أو 0.75 (أقل من 100%). للإلغاء /cancel.'
+      :'💰 أدخل الرسوم الثابتة بعملة '+m.pay_currency+(m.pay_currency==='USD'?' مثل 2.50':' مثل 2000')+'. للإلغاء /cancel.');
   }
   else if(data.startsWith('admin_pay_edit:')){
     const [,key,field]=data.split(':');
@@ -624,6 +674,16 @@ export async function handleAdminText(db,env,uid,session,message){
       .bind(key,text,100+count).run();
     await clearSession(db,uid);await audit(db,uid,'add_payment_method','payment_method',0);
     await sendText(env,uid,'✅ أضيفت الوسيلة. أضف بيانات الاستلام ثم فعّلها وأظهرها.',keyboard([button('💳 إعداد الوسيلة','admin_pay:'+key)]));
+    return true;
+  }
+  if(session.action==='owner_pay_fee'){
+    const key=session.payload?.key,m=await paymentMethod(db,env,key);
+    if(!m||m.fee_mode==='none')return true;
+    const amount=parseTransferFee(text,m.fee_mode,m.pay_currency);
+    if(amount===null){await sendText(env,uid,'❌ أدخل رسوماً صحيحة غير سالبة أو نسبة أقل من 100% (منزلتان عشريتان).');return true;}
+    await db.prepare('UPDATE payment_methods SET fee_value=? WHERE method_key=?').bind(amount,key).run();
+    await clearSession(db,uid);
+    await sendText(env,uid,'✅ تم حفظ الرسوم دون تغيير سعر الصرف.',keyboard([button('🧮 إعداد الحساب','admin_pay_quote:'+key)]));
     return true;
   }
   if(session.action==='owner_pay_edit'){

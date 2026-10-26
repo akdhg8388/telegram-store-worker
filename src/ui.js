@@ -1,5 +1,6 @@
 import {categoryButton} from './category-emoji.js';
 import {methodList,paymentMethod,paymentName,paymentButton} from './payment-methods.js';
+import {formatTransferMinor,transferSummary} from './payment-quote.js';
 import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
@@ -262,13 +263,18 @@ export async function topupEvidence(db,env,uid,quote,method,messageId=null){
  const title=lang==='en'?'💳 Wallet top-up via ':'💳 شحن المحفظة عبر ';
  const body=lang==='en'?'🏦 Receiving details:':'🏦 بيانات الاستلام من الإدارة:';
  const footer=lang==='en'?'📸 Send the transfer reference or a payment-proof photo. An administrator will verify receipt before crediting your wallet.':'📸 أرسل الآن رقم التحويل أو صورة إثبات الحوالة. سيتحقق المدير من وصول المبلغ قبل إضافته للمحفظة.';
- const plain=`${title}${name}\n\n💰 ${lang==='en'?'Amount':'المبلغ'}: ${formatQuote(quote)}\n${body}\n${short(receiver,620)}\n\n${footer}${instructions?'\n\n'+short(instructions,500):''}`;
+ const transfer=transferSummary(quote);
+ const plain=`${title}${name}\n\n💰 ${lang==='en'?'Amount':'المبلغ'}: ${formatQuote(quote)}${transfer?'\n'+transfer:''}\n${body}\n${short(receiver,620)}\n\n${footer}${instructions?'\n\n'+short(instructions,500):''}`;
  const bold=[{type:'bold',offset:0,length:plain.length}];
  const raw=lang==='en'&&m.receiver_en?.trim()?m.receiver_entities_en:m.receiver_entities_ar;
  let emoji=[];
  try{emoji=JSON.parse(raw||'[]').filter(e=>e.type==='custom_emoji'&&e.offset>=0&&e.length>0&&e.offset+e.length<=receiver.length).map(e=>({...e,offset:e.offset+plain.indexOf(receiver)}));}catch{}
  const options={entities:[...bold,...emoji],preserveText:true};
- const markup=keyboard([button('↩️ إلغاء الطلب','topup_cancel','danger')]);
+ const markup=keyboard(
+   ...(quote.transferCurrency&&Number.isSafeInteger(quote.transferTotalMinor)
+      ?[[button('💸 المطلوب تحويله: '+formatTransferMinor(quote.transferTotalMinor,quote.transferCurrency),
+         'topup_amount_info:'+quote.quoteKey,'success')]]:[]),
+   [button('↩️ إلغاء الطلب','topup_cancel','danger')]);
  if(m.photo_file_id){
   const sent=await sendPhotoCard(env,uid,m.photo_file_id,plain,markup,{messageId,entities:options.entities,preserveText:true,onMessage:msg=>env.__trackTransient?.(uid,msg)});
   return sent;
@@ -281,6 +287,7 @@ export async function topupConfirm(db,env,uid,payload,messageId=null){
   return transientText(env,uid,`📋 مراجعة طلب شحن المحفظة
 
 💰 المبلغ: ${formatQuote(payload)}
+${transferSummary(payload)}
 💳 وسيلة الدفع: ${methodLabel}
 🔢 رقم العملية: ${short(payload.reference||'غير متوفر',160)}
 📸 إثبات التحويل: ${payload.proofFileId?'✅ مرفق':'غير مرفق'}

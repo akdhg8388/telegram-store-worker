@@ -15,6 +15,7 @@ import {beginPurchase,commitPurchase,showReceipt,purchaseList} from './wallet-pu
 import {readPurchaseViewIds,cleanupPurchaseViews,trackPurchaseView} from './purchase-views.js';
 import {boldEntities} from './v25-format.js';
 import {paymentMethod,paymentName} from './payment-methods.js';
+import {paymentQuote,transferSummary} from './payment-quote.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 
@@ -60,10 +61,10 @@ async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   let result;
   try {
     result=await db.prepare(`INSERT INTO topup_requests
-      (user_tg_id,method,amount_iqd,transfer_reference,proof_file_id,proof_unique_id,requested_currency,requested_amount_minor,quoted_rate_iqd,source_message_id,submission_key,custom_method_key)
-      SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE
+      (user_tg_id,method,amount_iqd,transfer_reference,proof_file_id,proof_unique_id,requested_currency,requested_amount_minor,quoted_rate_iqd,source_message_id,submission_key,custom_method_key,transfer_currency,transfer_base_minor,transfer_fee_minor,transfer_total_minor)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE
       (SELECT COUNT(*) FROM topup_requests WHERE user_tg_id=? AND status='pending') < 3`)
-      .bind(uid,['zain_balance','superqi','binance','asiacell','zaincash'].includes(p.method)?p.method:'asiacell',p.amountIqd,p.reference||null,p.proofFileId||null,p.proofUniqueId||null,p.currency,p.requestedMinor,p.rate,source,p.nonce,['zain_balance','superqi','binance','asiacell','zaincash'].includes(p.method)?null:p.method,uid).run();
+      .bind(uid,['zain_balance','superqi','binance','asiacell','zaincash'].includes(p.method)?p.method:'asiacell',p.amountIqd,p.reference||null,p.proofFileId||null,p.proofUniqueId||null,p.currency,p.requestedMinor,p.rate,source,p.nonce,['zain_balance','superqi','binance','asiacell','zaincash'].includes(p.method)?null:p.method,p.transferCurrency||null,p.transferBaseMinor??null,p.transferFeeMinor??null,p.transferTotalMinor??null,uid).run();
   }catch(err){
     if(/UNIQUE|constraint/i.test(String(err))){
       {
@@ -80,10 +81,10 @@ async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   const u=await getUser(db,uid);
   const record=await db.prepare('SELECT * FROM topup_requests WHERE id=?').bind(id).first();
   const methodLabel=paymentName(await paymentMethod(db,env,p.method),'ar');
-  const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${methodLabel}\n💰 المطلوب: ${formatQuote(p)}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
+  const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${methodLabel}\n💰 المطلوب: ${formatQuote(p)}${transferSummary(p)?'\n'+transferSummary(p):''}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
   await notifyAdmins(db,env,text,p.proofFileId||null,keyboard([button('📋 فتح طلب الشحن',`topup_detail:${id}`,'primary')]),{topupRequestId:id});
   ctx.waitUntil(flushOutbox(db,env));
-  const confirmation=await sendText(env,uid,`🟡 تم إرسال طلب الشحن #${id} للمراجعة.\n\n💰 ${formatQuote(p)}\n💸 ${methodLabel}\n🗓️ ${baghdadDate(record.created_at)}\n\nتابع حالته من «طلباتي».`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
+  const confirmation=await sendText(env,uid,`🟡 تم إرسال طلب الشحن #${id} للمراجعة.\n\n💰 ${formatQuote(p)}${transferSummary(p)?'\n'+transferSummary(p):''}\n💸 ${methodLabel}\n🗓️ ${baghdadDate(record.created_at)}\n\nتابع حالته من «طلباتي».`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
   if(source)ctx.waitUntil(safelyDeleteTopupMessage(env,uid,source));
   return confirmation;
 }
@@ -541,6 +542,11 @@ async function handleCallback(db,env,ctx,q){
     if(!id)return;
     return ui.topupStatusView(db,env,uid,id,q.message?.message_id);
   }
+  if(data.startsWith('topup_amount_info:')){
+    const session=await getSession(db,uid);
+    const ok=session?.action==='topup_evidence'&&session.payload?.quoteKey===data.slice('topup_amount_info:'.length);
+    return answerCallback(env,q.id,ok?transferSummary(session.payload):'انتهت هذه الخطوة. ابدأ طلباً جديداً.');
+  }
   if(data==='topup_cancel'){
     await clearSession(db,uid);
     return ui.wallet(db,env,uid,q.message?.message_id);
@@ -571,7 +577,10 @@ async function handleCallback(db,env,ctx,q){
     const selected=await paymentMethod(db,env,method);
     if(!selected?.enabled||!selected.visible)return sendText(env,uid,'هذه الوسيلة غير متاحة حالياً.');
     if(!await receiverFor(db,env,method))return sendText(env,uid,'هذه الوسيلة غير مهيأة لدى الإدارة بعد.');
-    const payload={...session.payload,method,reference:null,proofFileId:null,proofUniqueId:null};
+    const transfer=paymentQuote(selected,session.payload);
+    if(selected.quote_enabled!==0&&!transfer)return sendText(env,uid,'⚠️ إعداد احتساب مبلغ التحويل غير صالح؛ تواصل مع الإدارة.');
+    const payload={...session.payload,method,reference:null,proofFileId:null,proofUniqueId:null,
+       ...(transfer?{transferCurrency:transfer.currency,transferBaseMinor:transfer.baseMinor,transferFeeMinor:transfer.feeMinor,transferTotalMinor:transfer.totalMinor}:{})};
     await setSession(db,uid,'topup_evidence',payload);
     return ui.topupEvidence(db,env,uid,payload,method,q.message?.message_id);
   }
@@ -662,7 +671,7 @@ async function handlePayment(db,env,ctx,message){
 }
 export async function processUpdate(db,env,ctx,update){
   // Acknowledge callbacks immediately, independent of D1 latency.
-  if(update.callback_query?.id){
+  if(update.callback_query?.id&&!String(update.callback_query.data||'').startsWith('topup_amount_info:')){
     ctx.waitUntil(answerCallback(env,update.callback_query.id).catch(e=>console.error('callback acknowledgement',String(e))));
   }
   const incomingId=update.callback_query?.from?.id||update.message?.from?.id||update.pre_checkout_query?.from?.id;
