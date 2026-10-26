@@ -487,21 +487,6 @@ async function handleCallback(db,env,ctx,q){
     const url=await getSetting(db,'news_url',env.NEWS_URL||'');
     return url.startsWith('https://')?sendText(env,uid,`📢 قناة الأخبار: ${url}`,keyboard(backRow())):sendText(env,uid,'لم يضف المدير قناة أخبار بعد.',keyboard(backRow()));
   }
-  if(data==='language')return sendOrEditText(env,uid,choice(env,
-    '🌐 اختر لغة المتجر:\n\nاللغة الحالية: العربية/English',
-    '🌐 Choose your store language:\n\nSelect Arabic or English below.'),keyboard(
-      [button('🇮🇶 العربية','language_ar','primary'),button('🇬🇧 English','language_en','success')],backRow()),q.message?.message_id);
-  if(data==='language_ar'||data==='language_en'){
-    const lang=data==='language_en'?'en':'ar';
-    await db.prepare('UPDATE users SET language=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(lang,uid).run();
-    env.__locale=lang;
-    // Per-chat commands match the customer's chosen store language even when
-    // their Telegram application itself uses a different device language.
-    const menuCommands=isAdmin(env,uid)?(lang==='en'?OWNER_COMMANDS_EN:OWNER_COMMANDS):(lang==='en'?CUSTOMER_COMMANDS_EN:CUSTOMER_COMMANDS);
-    ctx.waitUntil(telegram(env,'setMyCommands',{scope:{type:'chat',chat_id:uid},commands:menuCommands})
-      .catch(e=>console.error('Failed to update user command language',String(e))));
-    return ui.home(db,env,uid,q.message?.message_id);
-  }
   if(data==='referrals')return referralPage(db,env,uid,q.message?.message_id);
   if(data==='referral_history')return referralHistory(db,env,uid,q.message?.message_id);
   if(data.startsWith('category:')){
@@ -688,7 +673,7 @@ export async function processUpdate(db,env,ctx,update){
     incomingId?getUser(db,incomingId):Promise.resolve(null)
   ]);
   if(done)return;
-  const locale=knownUser?.language==='en'?'en':'ar';
+  const locale='ar';
   // Media-message callbacks cannot be edited using editMessageText. Carry the
   // source type only for this update to avoid a failing Telegram API round trip.
   const source=update.callback_query?.message;
