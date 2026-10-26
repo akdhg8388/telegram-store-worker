@@ -40,7 +40,7 @@ test('V29 migration preserves settled and pending wallet topups and admin refere
  assert.equal(c.prepare('SELECT method FROM topup_requests WHERE id=1').get().method,'superqi');
  assert.equal(c.prepare('SELECT topup_id FROM topup_admin_messages WHERE message_id=558').get().topup_id,1);
  assert.equal(c.prepare("SELECT count(*) AS n FROM pragma_foreign_key_check").get().n,0);
- c.exec("INSERT INTO topup_requests(user_tg_id,method,amount_iqd,transfer_reference) VALUES(101,'custom_new',1000,'ref-2')");
- assert.equal(c.prepare("SELECT method FROM topup_requests WHERE id=2").get().method,'custom_new');
+ c.exec("INSERT INTO topup_requests(user_tg_id,method,custom_method_key,amount_iqd,transfer_reference) VALUES(101,'asiacell','custom_new',1000,'ref-2')");
+ assert.equal(c.prepare("SELECT custom_method_key AS method FROM topup_requests WHERE id=2").get().method,'custom_new');
  }finally{c.close()}
 });
