@@ -60,10 +60,10 @@ async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   let result;
   try {
     result=await db.prepare(`INSERT INTO topup_requests
-      (user_tg_id,method,amount_iqd,transfer_reference,proof_file_id,proof_unique_id,requested_currency,requested_amount_minor,quoted_rate_iqd,source_message_id,submission_key)
-      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE
+      (user_tg_id,method,amount_iqd,transfer_reference,proof_file_id,proof_unique_id,requested_currency,requested_amount_minor,quoted_rate_iqd,source_message_id,submission_key,custom_method_key)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE
       (SELECT COUNT(*) FROM topup_requests WHERE user_tg_id=? AND status='pending') < 3`)
-      .bind(uid,p.method,p.amountIqd,p.reference||null,p.proofFileId||null,p.proofUniqueId||null,p.currency,p.requestedMinor,p.rate,source,p.nonce,uid).run();
+      .bind(uid,['zain_balance','superqi','binance','asiacell','zaincash'].includes(p.method)?p.method:'asiacell',p.amountIqd,p.reference||null,p.proofFileId||null,p.proofUniqueId||null,p.currency,p.requestedMinor,p.rate,source,p.nonce,['zain_balance','superqi','binance','asiacell','zaincash'].includes(p.method)?null:p.method,uid).run();
   }catch(err){
     if(/UNIQUE|constraint/i.test(String(err))){
       {
@@ -330,7 +330,7 @@ async function topupDetail(db,env,uid,id,messageId=null){
   if(!isAdmin(env,uid))return;
   const t=await db.prepare('SELECT t.*,u.first_name,u.username FROM topup_requests t JOIN users u ON u.tg_id=t.user_tg_id WHERE t.id=?').bind(id).first();
   if(!t)return sendText(env,uid,'الطلب غير موجود.');
-  const detailName=paymentName(await paymentMethod(db,env,t.method),'ar');
+  const detailName=paymentName(await paymentMethod(db,env,t.custom_method_key||t.method),'ar');
   const summary=`📋 طلب شحن #${id}\n\n👤 الاسم: ${short(t.first_name,80)}\n🔗 المعرف: ${t.username?'@'+t.username:'غير متوفر'}\n🆔 Telegram ID: ${t.user_tg_id}\n💰 المبلغ المطلوب: ${formatIQD(t.amount_iqd)}\n💸 الوسيلة: ${detailName}\n🔢 رقم الحوالة: ${short(t.transfer_reference||'غير مرفق',150)}\n📸 الإثبات: ${t.proof_file_id?'صورة مرفقة':'رقم حوالة'}\n🗓️ تاريخ الطلب: ${baghdadDate(t.created_at)}\n📌 الحالة: ${t.status==='pending'?'قيد المراجعة':t.status==='approved'?'✅ مكتمل':'❌ مرفوض'}${t.decided_at?'\n🗓️ تاريخ القرار: '+baghdadDate(t.decided_at):''}${t.credited_amount_iqd!==null?'\n✅ المبلغ المعتمد: '+formatIQD(t.credited_amount_iqd):''}`;
   const rows=[];
   if(t.proof_file_id)rows.push([button('📷 عرض صورة الإثبات',`topup_photo:${id}`,'primary')]);
@@ -369,7 +369,7 @@ async function settleTopup(db,env,ctx,uid,id,amount=null,messageId=null){
   await audit(db,uid,approved?'approve':'reject','topup',id);
   const current=await db.prepare('SELECT * FROM topup_requests WHERE id=?').bind(id).first();
   const customer=await getUser(db,current.user_tg_id);
-  const settledName=paymentName(await paymentMethod(db,env,current.method),'ar');
+  const settledName=paymentName(await paymentMethod(db,env,current.custom_method_key||current.method),'ar');
   const notice=approved?`✅ تم شحن محفظتك بنجاح!\n\n🧾 رقم الطلب: #${id}\n💰 المبلغ المطلوب: ${formatIQD(current.amount_iqd)}\n✅ المبلغ المضاف فعلياً: ${formatIQD(amount)}\n💳 رصيد المحفظة: ${formatIQD(customer.wallet_balance_iqd)}\n💸 الوسيلة: ${settledName}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت الاعتماد: ${baghdadDate(current.decided_at)}\n🟢 الحالة: مكتملة\n\nشكراً لاستخدامك My Store.`
     :`❌ تم رفض طلب شحن المحفظة #${id}.\n\n💰 المبلغ المطلوب: ${formatIQD(current.amount_iqd)}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت القرار: ${baghdadDate(current.decided_at)}\nلم تتم إضافة أي مبلغ. للمساعدة افتح قسم الدعم.`;
   await notifyUser(db,current.user_tg_id,notice,keyboard([button('📦 طلباتي','orders','primary'),button('💳 محفظتي','wallet','success')]),approved?{entities:boldEntities(notice)}:{});
