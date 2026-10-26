@@ -12,7 +12,6 @@ export const HOME_BUTTONS=Object.freeze([
   {id:'messages',action:'my_support_inbox',ar:'📨 رسائلي',en:'📨 My Messages'},
   {id:'transactions',action:'transactions',ar:'📜 سجل العمليات',en:'📜 Transaction History'},
   {id:'referrals',action:'referrals',ar:'👥 الإحالات',en:'👥 Referrals'},
-  {id:'language',action:'language',ar:'🌐 اللغة',en:'🌐 Language'},
   {id:'support',action:'support',ar:'🎧 الدعم',en:'🎧 Support',legacy:'support_custom_emoji_id'},
   {id:'news',action:'news',ar:'📢 الأخبار',en:'📢 News'},
   {id:'admin',action:'admin',ar:'🛡️ لوحة تحكم المدير',en:'🛡️ Admin Panel'},
@@ -30,7 +29,6 @@ export function homeButtonSettings(){
   const result={};
   for(const x of HOME_BUTTONS){
     result[homeSettingKey(x.id,'label_ar')]={label:`✏️ اسم زر ${x.ar} بالعربي`,max:52};
-    result[homeSettingKey(x.id,'label_en')]={label:`✏️ English label for ${x.en}`,max:52};
     result[homeSettingKey(x.id,'icon')]={label:`✨ رمز زر ${x.ar}`,max:30,customEmoji:true};
     result[homeSettingKey(x.id,'color')]={label:`🌈 لون زر ${x.ar}`,max:8};
     result[homeSettingKey(x.id,'visible')]={label:`👁️ إظهار زر ${x.ar}`,max:5,toggle:true};
@@ -39,7 +37,6 @@ export function homeButtonSettings(){
     result[homeSettingKey(x.id,'inline_en')]={label:'Internal emoji fallback (English)',max:16,internal:true,internalText:true};
   }
   result[homeSettingKey('messages','description_ar')]={label:'📝 وصف صفحة رسائلي بالعربي',max:800};
-  result[homeSettingKey('messages','description_en')]={label:'📝 My Messages page description (English)',max:800};
   for(const x of ICON_SLOTS)result[productIconKey(x.id)]={label:x.ar,max:30,customEmoji:true};
   return result;
 }
@@ -52,11 +49,11 @@ export async function loadVisualSettings(db){
 export function resolvedHomeButton(settings,id,lang='ar'){
   const def=HOME_BUTTONS.find(x=>x.id===id);
   if(!def)return null;
-  const key=homeSettingKey(id,lang==='en'?'label_en':'label_ar');
-  const title=String(settings[key]||'').trim()||def[lang==='en'?'en':'ar'];
+  const key=homeSettingKey(id,'label_ar');
+  const title=String(settings[key]||'').trim()||def.ar;
   const iconKey=homeSettingKey(id,'icon');
   const icon=emojiId(Object.hasOwn(settings,iconKey)?settings[iconKey]:(def.legacy?settings[def.legacy]:''));
-  const symbol=String(settings[homeSettingKey(id,lang==='en'?'inline_en':'inline_ar')]||'');
+  const symbol=String(settings[homeSettingKey(id,'inline_ar')]||'');
   return {text:short(title,52),icon,inlineSymbol:icon&&symbol&&title.includes(symbol)?symbol:null};
 }
 // Telegram button texts have no message entities. A custom emoji must be
