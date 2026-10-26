@@ -1,13 +1,9 @@
 import {ADMIN_EN} from './i18n-admin.js';
 // English is a presentation choice only. IDs, prices, credentials, callback routes
 // and the original owner-authored product content remain unchanged in D1.
-export const languageOf=env=>env?.__locale==='en'?'en':'ar';
-export const choice=(env,ar,en)=>languageOf(env)==='en'?en:ar;
-export async function userLanguage(db,uid){
-  if(!uid)return 'ar';
-  const row=await db.prepare('SELECT language FROM users WHERE tg_id=?').bind(uid).first();
-  return row?.language==='en'?'en':'ar';
-}
+export const languageOf=()=> 'ar';
+export const choice=(_env,ar)=>ar;
+export async function userLanguage(){return 'ar';}
 
 // Fixed UI vocabulary shared by customer and owner paths. Replacements are sorted
 // longest first so a short label cannot corrupt a longer translated phrase.
