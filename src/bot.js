@@ -17,7 +17,7 @@ import {boldEntities} from './v25-format.js';
 import {paymentMethod,paymentName} from './payment-methods.js';
 import {paymentQuote,transferSummary} from './payment-quote.js';
 import {trackTopupView,cleanTopupViews} from './topup-cleanup.js';
-import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20TxidIsValid,verifyTrc20Payment,creditVerifiedTrc20,formatUsdtMicro} from './trc20-payments.js';
+import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20TxidIsValid,verifyTrc20Payment,creditVerifiedTrc20,formatUsdtMicro,notifyTrc20Alert} from './trc20-payments.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 
@@ -129,6 +129,11 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     let result;
     try{result=await verifyTrc20Payment(env,intent,txid)}
     catch(e){console.error('TRC20 verification failed',String(e));return sendText(env,uid,'⏳ تعذر التحقق من الشبكة حالياً. أعد إرسال TXID لاحقاً؛ لم نضف أي رصيد.');}
+    if(result.status==='mismatch'||result.status==='late'){
+      try{await notifyTrc20Alert(db,env,intent,txid,result.status==='late'?'حوالة متأخرة':'مبلغ تحويل غير مطابق')}
+      catch(error){console.error('TRC20 alert failed',String(error))}
+      ctx.waitUntil(flushOutbox(db,env));
+    }
     if(result.status!=='confirmed')return sendText(env,uid,({
       pending:'⏳ لم يتم تأكيد الحوالة على الشبكة بعد. أعد إرسال TXID بعد دقائق.',
       mismatch:'❌ الحوالة لا تطابق العنوان والمبلغ المطلوب. لن يضاف أي رصيد.',
@@ -137,9 +142,10 @@ async function handleTextState(db,env,ctx,uid,message,session) {
       invalid:'❌ TXID غير صالح.'
     })[result.status]||'⚠️ لم نجد حوالة مؤكدة مطابقة لهذه العملية. تأكد من الشبكة ورقم المعاملة.');
     let settled;
-    try{settled=await creditVerifiedTrc20(db,uid,intent.id,txid)}
+    try{settled=await creditVerifiedTrc20(db,uid,intent.id,txid,env,result.blockTimestamp)}
     catch(e){console.error('TRC20 settlement rejected',String(e));return sendText(env,uid,'⚠️ لم نتمكن من تسوية الحوالة بأمان. لا تعاود التحويل؛ تواصل مع الدعم ومعك TXID.');}
     await clearSession(db,uid);
+    ctx.waitUntil(flushOutbox(db,env));
     const account=await getUser(db,uid);
     return sendText(env,uid,'✅ تم التحقق من حوالتك وشحن محفظتك تلقائياً!\n💰 المضاف: '+formatIQD(settled.amount_iqd)+
       '\n💳 رصيدك: '+formatIQD(account.wallet_balance_iqd)+'\n🧾 رقم الطلب: #'+settled.id,
@@ -643,7 +649,7 @@ async function handleCallback(db,env,ctx,q){
     if(isTrc20Method(method)){
       if(!env.TRONGRID_API_KEY)return sendText(env,uid,'⛔ التحقق من TRC20 غير متاح حالياً. اختر وسيلة أخرى.');
       let intent;
-      try{intent=await newTrc20Intent(db,uid,session.payload,selected)}
+      try{intent=await newTrc20Intent(db,uid,session.payload,selected,env)}
       catch(e){console.error('TRC20 intent not created',String(e));return sendText(env,uid,'⛔ تعذر تجهيز طلب TRC20. تأكد من العنوان والرسوم، أو استخدم وسيلة أخرى.');}
       await setSession(db,uid,'topup_trc20_txid',{intentId:intent.intentId});
       return ui.topupTrc20(db,env,uid,intent,session.payload,q.message?.message_id);

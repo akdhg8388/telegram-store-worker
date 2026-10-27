@@ -23,6 +23,6 @@
     "ENABLE_MANUAL_TOPUPS": "false"
   },
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["* * * * *"]
   }
 }

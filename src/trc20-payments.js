@@ -24,7 +24,6 @@ export async function newTrc20Intent(db,uid,quote,method,env={}){
  const calculated=paymentQuote(method,quote);
  if(!calculated||calculated.currency!=='USD')throw new Error('TRC20_INVALID_QUOTE');
  const now=Math.floor(Date.now()/1000);
- await db.prepare("UPDATE trc20_payment_intents SET status='expired' WHERE status='waiting' AND expires_at<=?").bind(now).run();
  const pending=await db.prepare("SELECT COUNT(*) n FROM trc20_payment_intents WHERE user_tg_id=? AND status='waiting' AND expires_at>?").bind(uid,now).first();
  if(Number(pending?.n||0)>=3)throw new Error('TRC20_TOO_MANY_PENDING');
  const id=crypto.randomUUID();

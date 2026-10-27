@@ -261,7 +261,7 @@ export async function topupTrc20(db,env,uid,intent,quote,messageId=null){
  const body='🔴 شحن المحفظة عبر USDT TRC20\n\n💰 رصيد المحفظة المطلوب: '+formatQuote(quote)+
    '\n💸 قيمة التحويل الدقيقة: '+formatUsdtMicro(intent.expectedUsdtMicro)+
    '\n🌐 الشبكة: TRON (TRC20) فقط\n🏦 عنوان الاستلام:\n'+intent.receiver+
-   '\n\n⚠️ أرسل المبلغ الدقيق بالكامل. أي مبلغ مختلف أو شبكة أخرى لن يقبلها التحقق التلقائي.\n⏳ صلاحية الطلب 30 دقيقة. بعد التحويل اضغط «✅ دفعت» وأرسل TXID (رقم معاملة السحب).';
+   '\n\n⚠️ أرسل المبلغ الدقيق بالكامل. أي مبلغ مختلف أو شبكة أخرى لن يقبلها التحقق التلقائي.\n⏳ صلاحية الطلب 15 دقيقة. يراقب البوت التحويل تلقائياً كل دقيقة. زر «✅ دفعت» لإرسال TXID كخيار احتياطي.';
  return transientText(env,uid,body,keyboard(
    [button('💸 المطلوب: '+formatUsdtMicro(intent.expectedUsdtMicro),'topup_amount_info:'+intent.intentId,'success')],
    [button('✅ دفعت','topup_trc20_paid:'+intent.intentId,'success')],

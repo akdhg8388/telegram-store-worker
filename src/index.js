@@ -1,5 +1,6 @@
 import {processUpdate} from './bot.js';
 import {flushOutbox} from './telegram.js';
+import {pollTrc20Payments} from './trc20-cron.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -24,6 +25,11 @@ export default {
     }
   },
   async scheduled(_event,env,ctx){
-    if(env.DB && env.TELEGRAM_BOT_TOKEN)ctx.waitUntil(flushOutbox(env.DB,env,25));
+    if(!env.DB||!env.TELEGRAM_BOT_TOKEN)return;
+    ctx.waitUntil((async()=>{
+      try{await pollTrc20Payments(env.DB,env)}
+      catch(error){console.error('TRC20 scheduled verification failed',String(error))}
+      await flushOutbox(env.DB,env,25);
+    })());
   }
 };

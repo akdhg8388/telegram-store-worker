@@ -21,6 +21,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       ADMIN_ID: ${{ secrets.ADMIN_ID }}
       TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+      WALLET_ADDRESS: ${{ secrets.WALLET_ADDRESS }}
       CI: 'true'
       NO_COLOR: '1'
     steps:
@@ -72,6 +73,13 @@ jobs:
           printf '%s' "$ADMIN_ID" | npx wrangler secret put ADMIN_ID
           if [ -n "${TRONGRID_API_KEY:-}" ]; then
             printf '%s' "$TRONGRID_API_KEY" | npx wrangler secret put TRONGRID_API_KEY
+          fi
+          if [ -n "${WALLET_ADDRESS:-}" ]; then
+            if ! [[ "$WALLET_ADDRESS" =~ ^T[1-9A-HJ-NP-Za-km-z]{33}$ ]]; then
+              echo "::error::Invalid WALLET_ADDRESS (expected TRON address)."
+              exit 1
+            fi
+            printf '%s' "$WALLET_ADDRESS" | npx wrangler secret put WALLET_ADDRESS
           fi
           # Stable per bot token: a failed deploy cannot repeatedly rotate the webhook secret.
           WEBHOOK_SECRET="$(node -e "const c=require('node:crypto');process.stdout.write(c.createHmac('sha256',process.env.TELEGRAM_BOT_TOKEN).update('my-store-telegram-webhook:v1').digest('hex'))")"
