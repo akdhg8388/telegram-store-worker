@@ -18,7 +18,9 @@ export async function pollTrc20Payments(db,env){
      const oldest=Math.min(...intents.map(x=>Number(x.created_at)));
      networkCalls++;
      const events=await readConfirmedTrc20Transfers(env,receiver,oldest*1000);
-     const amounts=new Map(intents.map(intent=>[String(intent.expected_micro),intent]));
+     // Only whole, original, still-unpaid quotes can be correlated by amount;
+     // fractional installments are checked via their reserved amount when submitted.
+     const amounts=new Map(intents.filter(intent=>intent.status==='waiting'&&intent.full_quote_active===1).map(intent=>[String(intent.expected_micro),intent]));
      for(const event of events){
        if(!trc20TxidIsValid(event.transaction_id)||event.to!==receiver||
          event.type!=='Transfer'||String(event.token_info?.address||'')!==USDT_CONTRACT)

@@ -182,6 +182,12 @@ export async function acceptVerifiedTrc20Part(db,uid,id,verified,env={}){
    return {status:'duplicate'};
  const existing=await trc20PaymentProgress(db,id);
  if(!existing)return {status:'expired'};
+ // No proof of TXID ownership exists with a shared receiving address.
+ // Accept only an exact amount reserved BEFORE the payment's block time.
+ const claim=await db.prepare("SELECT id,created_at,amount_micro FROM trc20_payment_quotes WHERE intent_id=? AND status='waiting' LIMIT 1").bind(id).first();
+ const initialAllowed=intent.full_quote_active===1 && existing.partCount===0 && !claim && amount===Number(intent.expected_micro);
+ const claimAllowed=claim && amount===Number(claim.amount_micro) && time>=Number(claim.created_at)*1000;
+ if(!initialAllowed&&!claimAllowed)return {status:'unreserved'};
  if(amount>existing.remainingMicro)return {status:'overpaid',remainingMicro:existing.remainingMicro};
  const customer={chat_id:uid,text:'✅ تم تأكيد دفعات USDT TRC20 وشحن محفظتك.\n💰 المضاف: '+formatIQD(intent.amount_iqd)+
    '\n💳 مجموع المستلم: '+formatUsdtMicro(intent.expected_micro)+
@@ -199,6 +205,7 @@ export async function acceptVerifiedTrc20Part(db,uid,id,verified,env={}){
      "(SELECT COALESCE(SUM(p.amount_micro),0) FROM trc20_payment_parts p WHERE p.intent_id=i.id)+? <= i.expected_micro) "+
      "AND NOT EXISTS(SELECT 1 FROM trc20_payment_intents WHERE txid=?)")
      .bind(txid,id,amount,time,id,uid,intent.receiver,time,amount,txid),
+   db.prepare("UPDATE trc20_payment_quotes SET status='used' WHERE intent_id=? AND status='waiting' AND amount_micro=? AND created_at*1000<=?").bind(id,amount,time),
    db.prepare("UPDATE trc20_payment_intents SET status='credited',txid=?,credited_at=unixepoch() "+
      "WHERE id=? AND user_tg_id=? AND status='waiting' AND expires_at>unixepoch() "+
      "AND (SELECT COALESCE(SUM(amount_micro),0) FROM trc20_payment_parts WHERE intent_id=?)=expected_micro "+
@@ -218,9 +225,9 @@ export async function acceptVerifiedTrc20Part(db,uid,id,verified,env={}){
  ];
  const results=await db.batch(steps);
  if(results[0]?.meta?.changes!==1)return {status:'duplicate'};
- const credited=results[1]?.meta?.changes===1;
+ const credited=results[2]?.meta?.changes===1;
  if(credited){
-   if(results[2]?.meta?.changes!==1||results[3]?.meta?.changes!==1)
+   if(results[3]?.meta?.changes!==1||results[4]?.meta?.changes!==1)
      throw new Error('TRC20_SETTLEMENT_INCOMPLETE');
    const topup=await db.prepare("SELECT id,amount_iqd,user_tg_id FROM topup_requests WHERE submission_key=?").bind(id).first();
    return {status:'credited',topup,receivedMicro:existing.receivedMicro+amount,remainingMicro:0};

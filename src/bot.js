@@ -18,6 +18,7 @@ import {paymentMethod,paymentName} from './payment-methods.js';
 import {paymentQuote,transferSummary} from './payment-quote.js';
 import {trackTopupView,cleanTopupViews} from './topup-cleanup.js';
 import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20TxidIsValid,verifyTrc20Payment,creditVerifiedTrc20,acceptVerifiedTrc20Part,trc20PaymentProgress,formatUsdtMicro,notifyTrc20Alert} from './trc20-payments.js';
+import {issueTrc20Claim,parseSplitUsdCents,trc20ClaimMessage,activeTrc20Claim} from './trc20-claims.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 
@@ -116,6 +117,21 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     await setSession(db,uid,'topup_choose_method',extended);
     return ui.topupMethods(db,env,uid,extended);
   }
+  if(session.action==='topup_trc20_split_amount'){
+    const amount=parseSplitUsdCents(t);
+    if(amount===null)return sendText(env,uid,'❌ أرسل قيمة الدفعة بالدولار مثل 300 أو 25.50، ويجب أن تكون أقل من المبلغ المتبقي.');
+    const intent=await findTrc20Intent(db,uid,session.payload?.intentId);
+    if(!intent||intent.status!=='waiting')return sendText(env,uid,'⏰ هذا الطلب انتهى.');
+    let claimed;
+    try{claimed=await issueTrc20Claim(db,env,uid,intent.id,amount)}
+    catch(e){console.error('TRC20 installment reservation',String(e));return sendText(env,uid,'⚠️ تعذر تخصيص المبلغ. حاول مرة أخرى.');}
+    if(claimed.status!=='ready')return sendText(env,uid,'⚠️ تعذّر إصدار مبلغ فريد لهذا الطلب. اختَر قيمة أقل أو حاول مرة أخرى.');
+    await setSession(db,uid,'topup_trc20_txid',{intentId:intent.id});
+    return sendText(env,uid,trc20ClaimMessage(intent,claimed),keyboard(
+      [button('💸 نسخ مبلغ الدفعة', 'topup_amount_info:'+intent.id,'success')],
+      [button('✅ دفعت','topup_trc20_paid:'+intent.id,'success')],
+      [button('❌ إلغاء الطلب','topup_cancel','danger')]));
+  }
   if(session.action==='topup_trc20_txid'){
     await trackTopupView(db,uid,message.message_id);
     const intent=await findTrc20Intent(db,uid,session.payload?.intentId);
@@ -148,6 +164,7 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     try{payment=await acceptVerifiedTrc20Part(db,uid,intent.id,result,env)}
     catch(e){console.error('TRC20 installments could not be recorded',String(e));
       return sendText(env,uid,'⚠️ تعذّر حفظ الدفعة بأمان. لا تكرر التحويل؛ تواصل مع الدعم ومعك TXID.');}
+    if(payment.status==='unreserved')return sendText(env,uid,'🔒 هذه الحوالة لا تطابق مبلغاً فريداً أصدره البوت لطلبك قبل تحويلها. لا يمكن احتساب TXID عام. تواصل مع الدعم إذا أرسلت دفعة بالفعل.');
     if(payment.status==='duplicate')return sendText(env,uid,'⚠️ رقم TXID هذا مسجّل سابقاً. لا يمكن احتساب نفس الحوالة مرتين.');
     if(payment.status==='overpaid'){
       try{await notifyTrc20Alert(db,env,intent,txid,'مجموع الدفعات يتجاوز المبلغ المطلوب')}catch{}
@@ -163,7 +180,7 @@ async function handleTextState(db,env,ctx,uid,message,session) {
         '\n✅ مجموع المستلم: '+formatUsdtMicro(payment.receivedMicro)+
         '\n💸 المتبقي للتحويل: '+formatUsdtMicro(payment.remainingMicro)+
         '\n\n⏱️ أكمل المتبقي خلال مهلة الطلب الأصلية (15 دقيقة).\n🧾 بعد الحوالة المكملة، أرسل TXID الجديد هنا.\n🔒 رصيد المحفظة لن يُشحن إلا بعد اكتمال المبلغ.',
-        keyboard([button('❌ إلغاء الطلب','topup_cancel','danger')]));
+        keyboard([button('➕ تحديد مبلغ الدفعة التالية','topup_trc20_split:'+intent.id,'primary')],[button('❌ إلغاء الطلب','topup_cancel','danger')]));
     }
     await clearSession(db,uid);
     const account=await getUser(db,uid);
@@ -648,14 +665,33 @@ async function handleCallback(db,env,ctx,q){
     await setSession(db,uid,'topup_custom',{currency:w.currency});
     return sendText(env,uid,`✏️ أدخل المبلغ المخصص بعملة ${w.currency}\n\n${w.currency==='USD'?'مثال: 25.50':'مثال: 25000'}\nللإلغاء: /cancel`);
   }
+  if(data.startsWith('topup_trc20_split:')){
+    const id=data.slice('topup_trc20_split:'.length);
+    const intent=await findTrc20Intent(db,uid,id);
+    if(!intent||intent.status!=='waiting'||intent.expires_at<=Math.floor(Date.now()/1000))return sendText(env,uid,'⏰ انتهت مهلة الطلب.');
+    const progress=await trc20PaymentProgress(db,id);
+    const active=await activeTrc20Claim(db,id);
+    if(active)return sendText(env,uid,'🔒 عندك دفعة محجوزة بالفعل: '+formatUsdtMicro(Number(active.amount_micro))+'؛ أرسل TXID الخاص بها قبل إنشاء دفعة ثانية.');
+    if(progress.partCount===0 && intent.full_quote_active===1){
+      await setSession(db,uid,'topup_trc20_split_amount',{intentId:id});
+      return sendText(env,uid,'💸 اختَر مبلغ الدفعة الأولى، مثلاً 300 أو 25.50 USDT. سيضيف البوت كسوراً فريدة إلى المبلغ قبل تحويله، حتى يربطه بطلبك بأمان.');
+    }
+    let claim;
+    try{claim=await issueTrc20Claim(db,env,uid,id)}
+    catch(e){console.error('TRC20 remaining reservation',String(e));return sendText(env,uid,'⚠️ تعذر حجز المتبقي.');}
+    if(claim.status!=='ready')return sendText(env,uid,'⚠️ تعذر إنشاء حجز فريد للمتبقي؛ تواصل مع الدعم.');
+    await setSession(db,uid,'topup_trc20_txid',{intentId:id});
+    return sendText(env,uid,trc20ClaimMessage(intent,claim),keyboard([button('✅ دفعت','topup_trc20_paid:'+id,'success')],[button('❌ إلغاء الطلب','topup_cancel','danger')]));
+  }
   if(data.startsWith('topup_trc20_paid:')){
     const id=data.slice('topup_trc20_paid:'.length);
     const intent=await findTrc20Intent(db,uid,id);
     if(!intent||intent.status!=='waiting'||intent.expires_at<=Math.floor(Date.now()/1000))
       return sendText(env,uid,'⏰ انتهى طلب الدفع. تواصل مع الدعم إذا حولت فعلاً.');
     await setSession(db,uid,'topup_trc20_txid',{intentId:id});
+    const claim=await activeTrc20Claim(db,id);
     const progress=await trc20PaymentProgress(db,id);
-    return sendText(env,uid,'✅ إذا حولت '+formatUsdtMicro(progress?.remainingMicro??intent.expected_micro)+
+    return sendText(env,uid,'✅ إذا حولت '+formatUsdtMicro(Number(claim?.amount_micro??progress?.remainingMicro??intent.expected_micro))+
       ' على شبكة TRC20 إلى العنوان المحدد، أرسل الآن رقم المعاملة TXID من سجل السحب في Binance.\n\n🔒 لن يُضاف أي رصيد إلا بعد مطابقة الحوالة المؤكدة.\nللإلغاء /cancel.',
       keyboard([button('❌ إلغاء الطلب','topup_cancel','danger')]));
   }
