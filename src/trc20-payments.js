@@ -132,9 +132,11 @@ export function inspectTrc20Receipt(receipt,intent,txid,recipientHex){
    foundRecipient=true;
    const amount=String(log.data||'').replace(/^0x/i,'');
    if(!/^[a-fA-F0-9]{64}$/.test(amount))continue;
-   if(BigInt('0x'+amount)!==BigInt(intent.expected_micro))continue;
+   const micro=BigInt('0x'+amount);
+   if(micro<=0n||micro>BigInt(Number.MAX_SAFE_INTEGER))continue;
    if(time<Number(intent.created_at)*1000||time>Number(intent.expires_at)*1000)return {status:'late'};
-   return {status:'confirmed',txid,blockTimestamp:time};
+   if(micro>BigInt(intent.expected_micro))return {status:'overpaid',txid,amountMicro:Number(micro),blockTimestamp:time};
+   return {status:micro===BigInt(intent.expected_micro)?'confirmed':'partial',txid,amountMicro:Number(micro),blockTimestamp:time};
  }
  return {status:foundRecipient||transferLogs.length?'mismatch':'invalid'};
 }
@@ -152,37 +154,90 @@ export async function verifyTrc20Payment(env,intent,txid){
  });
  return inspectTrc20Receipt(receipt,intent,id,recipientHex);
 }
-export async function creditVerifiedTrc20(db,uid,id,txid,env={},blockTimestamp=null){
- if(!trc20TxidIsValid(txid))throw new Error('INVALID_TXID');
- const normalized=txid.toLowerCase();
- const intent=await db.prepare('SELECT * FROM trc20_payment_intents WHERE id=? AND user_tg_id=?').bind(id,uid).first();
+// Read-only progress used for receipt messages. No blockchain calls or re-quote.
+export async function trc20PaymentProgress(db,id){
+ const row=await db.prepare(
+   "SELECT i.expected_micro,COALESCE(SUM(p.amount_micro),0) AS received_micro,COUNT(p.txid) AS part_count "+
+   "FROM trc20_payment_intents i LEFT JOIN trc20_payment_parts p ON p.intent_id=i.id WHERE i.id=? GROUP BY i.id"
+ ).bind(id).first();
+ if(!row)return null;
+ return {expectedMicro:Number(row.expected_micro),receivedMicro:Number(row.received_micro),
+   remainingMicro:Math.max(0,Number(row.expected_micro)-Number(row.received_micro)),partCount:Number(row.part_count)};
+}
+// Used for BOTH full one-payment deposits and installments. The batch is one D1
+// transaction, with the atomic TXID claim *before* final ledger creation.
+// Wallet amounts and the original quoted rate are immutable.
+export async function acceptVerifiedTrc20Part(db,uid,id,verified,env={}){
+ const txid=String(verified?.txid||'').toLowerCase();
+ const amount=Number(verified?.amountMicro),time=Number(verified?.blockTimestamp);
+ if(!trc20TxidIsValid(txid)||!Number.isSafeInteger(amount)||amount<=0||
+   !Number.isSafeInteger(time)||time<=0)throw new Error('TRC20_INVALID_PART');
+ const intent=await db.prepare(
+   'SELECT * FROM trc20_payment_intents WHERE id=? AND user_tg_id=?').bind(id,uid).first();
  if(!intent||intent.status!=='waiting'||Number(intent.expires_at)<=Math.floor(Date.now()/1000))
-   throw new Error('TRC20_ORDER_NOT_ACTIVE');
- if(configuredTrc20Receiver(env)!==intent.receiver)throw new Error('TRC20_RECEIVER_CHANGED');
- const ts=blockTimestamp===null?Math.floor(Date.now()/1000)*1000:blockTimestamp;
- if(!Number.isSafeInteger(ts)||ts<intent.created_at*1000||ts>intent.expires_at*1000)
-   throw new Error('TRC20_TRANSFER_OUTSIDE_WINDOW');
- const confirmation='✅ تم شحن محفظتك تلقائياً بعد تأكيد حوالة USDT TRC20.\n💰 الرصيد المضاف: '+formatIQD(intent.amount_iqd)+
-  '\n💸 المبلغ المستلم: '+formatUsdtMicro(intent.expected_micro)+'\n🔖 TXID: '+normalized;
- const notifications=[
-   {chat_id:uid,text:confirmation},
-   ...adminIds(env).map(owner=>({chat_id:owner,text:'✅ شحن TRC20 تلقائي ناجح\n👤 العميل: '+uid+
-      '\n💰 المضاف: '+formatIQD(intent.amount_iqd)+'\n💵 الوارد: '+formatUsdtMicro(intent.expected_micro)+
-      '\n🧾 TXID: '+normalized}))
- ];
+   return {status:'expired'};
+ if(configuredTrc20Receiver(env)!==intent.receiver)return {status:'unconfigured'};
+ if(time<Number(intent.created_at)*1000||time>Number(intent.expires_at)*1000)return {status:'late'};
+ if(await db.prepare('SELECT id FROM trc20_payment_intents WHERE txid=?').bind(txid).first())
+   return {status:'duplicate'};
+ const existing=await trc20PaymentProgress(db,id);
+ if(!existing)return {status:'expired'};
+ if(amount>existing.remainingMicro)return {status:'overpaid',remainingMicro:existing.remainingMicro};
+ const customer={chat_id:uid,text:'✅ تم تأكيد دفعات USDT TRC20 وشحن محفظتك.\n💰 المضاف: '+formatIQD(intent.amount_iqd)+
+   '\n💳 مجموع المستلم: '+formatUsdtMicro(intent.expected_micro)+
+   '\n🧾 رقم الطلب: '+id};
+ const notifications=[customer,...adminIds(env).map(owner=>({chat_id:owner,
+   text:'✅ شحن TRC20 مكتمل تلقائياً\n👤 العميل: '+uid+
+   '\n💰 المضاف: '+formatIQD(intent.amount_iqd)+
+   '\n💵 الإجمالي: '+formatUsdtMicro(intent.expected_micro)+
+   '\n🧾 آخر TXID: '+txid}))];
  const steps=[
-   db.prepare("UPDATE trc20_payment_intents SET status='credited',txid=?,credited_at=unixepoch() WHERE id=? AND user_tg_id=? AND status='waiting' AND expires_at>unixepoch() AND created_at*1000<=? AND expires_at*1000>=?")
-     .bind(normalized,id,uid,ts,ts),
-   db.prepare("INSERT INTO topup_requests(user_tg_id,method,custom_method_key,amount_iqd,transfer_reference,status,decided_at,credited_amount_iqd,requested_currency,requested_amount_minor,quoted_rate_iqd,submission_key,transfer_currency,transfer_base_minor,transfer_fee_minor,transfer_total_minor) SELECT user_tg_id,'binance','usdt_trc20',amount_iqd,txid,'approved',CURRENT_TIMESTAMP,amount_iqd,requested_currency,requested_amount_minor,quoted_rate_iqd,id,'USD',payment_base_minor,0,payment_base_minor FROM trc20_payment_intents WHERE id=? AND status='credited' AND txid=?")
-     .bind(id,normalized),
-   db.prepare("INSERT INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key,note) SELECT user_tg_id,amount_iqd,'topup','trc20:'||txid,'TRC20 USDT confirmed on chain' FROM trc20_payment_intents WHERE id=? AND status='credited' AND txid=?")
-     .bind(id,normalized),
-   ...notifications.map(n=>db.prepare("INSERT INTO notification_outbox(method,payload) SELECT 'sendMessage',? WHERE EXISTS (SELECT 1 FROM trc20_payment_intents WHERE id=? AND status='credited' AND txid=?)")
-     .bind(JSON.stringify(n),id,normalized))
+   db.prepare("INSERT OR IGNORE INTO trc20_payment_parts(txid,intent_id,amount_micro,block_timestamp) "+
+     "SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM trc20_payment_intents i WHERE "+
+     "i.id=? AND i.user_tg_id=? AND i.receiver=? AND i.status='waiting' AND i.expires_at>unixepoch() "+
+     "AND ? BETWEEN i.created_at*1000 AND i.expires_at*1000 AND "+
+     "(SELECT COALESCE(SUM(p.amount_micro),0) FROM trc20_payment_parts p WHERE p.intent_id=i.id)+? <= i.expected_micro) "+
+     "AND NOT EXISTS(SELECT 1 FROM trc20_payment_intents WHERE txid=?)")
+     .bind(txid,id,amount,time,id,uid,intent.receiver,time,amount,txid),
+   db.prepare("UPDATE trc20_payment_intents SET status='credited',txid=?,credited_at=unixepoch() "+
+     "WHERE id=? AND user_tg_id=? AND status='waiting' AND expires_at>unixepoch() "+
+     "AND (SELECT COALESCE(SUM(amount_micro),0) FROM trc20_payment_parts WHERE intent_id=?)=expected_micro "+
+     "AND EXISTS(SELECT 1 FROM trc20_payment_parts WHERE txid=? AND intent_id=?)")
+     .bind(txid,id,uid,id,txid,id),
+   db.prepare("INSERT INTO topup_requests(user_tg_id,method,custom_method_key,amount_iqd,transfer_reference,status,decided_at,credited_amount_iqd,requested_currency,requested_amount_minor,quoted_rate_iqd,submission_key,transfer_currency,transfer_base_minor,transfer_fee_minor,transfer_total_minor) "+
+     "SELECT user_tg_id,'binance','usdt_trc20',amount_iqd,txid,'approved',CURRENT_TIMESTAMP,amount_iqd,requested_currency,requested_amount_minor,quoted_rate_iqd,id,'USD',payment_base_minor,0,payment_base_minor "+
+     "FROM trc20_payment_intents WHERE id=? AND status='credited' AND txid=?")
+     .bind(id,txid),
+   db.prepare("INSERT OR IGNORE INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key,note) "+
+     "SELECT user_tg_id,amount_iqd,'topup','trc20-intent:'||id,'USDT TRC20 confirmed installments' "+
+     "FROM trc20_payment_intents WHERE id=? AND status='credited' AND txid=?")
+     .bind(id,txid),
+   ...notifications.map(n=>db.prepare("INSERT INTO notification_outbox(method,payload) "+
+     "SELECT 'sendMessage',? WHERE EXISTS(SELECT 1 FROM trc20_payment_intents WHERE id=? AND status='credited' AND txid=?)")
+     .bind(JSON.stringify(n),id,txid))
  ];
  const results=await db.batch(steps);
- if(results.slice(0,3).some(r=>r.meta?.changes!==1))throw new Error('TRC20_SETTLEMENT_NOT_ATOMIC');
- return db.prepare('SELECT id,amount_iqd,user_tg_id FROM topup_requests WHERE submission_key=?').bind(id).first();
+ if(results[0]?.meta?.changes!==1)return {status:'duplicate'};
+ const credited=results[1]?.meta?.changes===1;
+ if(credited){
+   if(results[2]?.meta?.changes!==1||results[3]?.meta?.changes!==1)
+     throw new Error('TRC20_SETTLEMENT_INCOMPLETE');
+   const topup=await db.prepare("SELECT id,amount_iqd,user_tg_id FROM topup_requests WHERE submission_key=?").bind(id).first();
+   return {status:'credited',topup,receivedMicro:existing.receivedMicro+amount,remainingMicro:0};
+ }
+ return {status:'partial',receivedMicro:existing.receivedMicro+amount,
+   remainingMicro:existing.remainingMicro-amount};
+}
+// Keep the one-payment Cron path compatible, but use exactly the same atomic
+// claim/settlement code so a TXID cannot be counted twice across payment types.
+export async function creditVerifiedTrc20(db,uid,id,txid,env={},blockTimestamp=null){
+ const intent=await db.prepare('SELECT * FROM trc20_payment_intents WHERE id=? AND user_tg_id=?').bind(id,uid).first();
+ if(!intent)throw new Error('TRC20_ORDER_NOT_FOUND');
+ const response=await acceptVerifiedTrc20Part(db,uid,id,{
+   txid,amountMicro:Number(intent.expected_micro),blockTimestamp
+ },env);
+ if(response.status!=='credited')throw new Error('TRC20_FULL_SETTLEMENT_'+response.status);
+ return response.topup;
 }
 export async function notifyTrc20Alert(db,env,intent,txid,reason){
  if(!intent||!trc20TxidIsValid(txid))return false;

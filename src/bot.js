@@ -17,7 +17,7 @@ import {boldEntities} from './v25-format.js';
 import {paymentMethod,paymentName} from './payment-methods.js';
 import {paymentQuote,transferSummary} from './payment-quote.js';
 import {trackTopupView,cleanTopupViews} from './topup-cleanup.js';
-import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20TxidIsValid,verifyTrc20Payment,creditVerifiedTrc20,formatUsdtMicro,notifyTrc20Alert} from './trc20-payments.js';
+import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20TxidIsValid,verifyTrc20Payment,creditVerifiedTrc20,acceptVerifiedTrc20Part,trc20PaymentProgress,formatUsdtMicro,notifyTrc20Alert} from './trc20-payments.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 
@@ -129,26 +129,46 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     let result;
     try{result=await verifyTrc20Payment(env,intent,txid)}
     catch(e){console.error('TRC20 verification failed',String(e));return sendText(env,uid,'⏳ تعذر التحقق من الشبكة حالياً. أعد إرسال TXID لاحقاً؛ لم نضف أي رصيد.');}
-    if(result.status==='mismatch'||result.status==='late'){
-      try{await notifyTrc20Alert(db,env,intent,txid,result.status==='late'?'حوالة متأخرة':'مبلغ تحويل غير مطابق')}
+    if(result.status==='mismatch'||result.status==='late'||result.status==='overpaid'){
+      try{await notifyTrc20Alert(db,env,intent,txid,
+        result.status==='late'?'حوالة خارج مهلة الطلب':result.status==='overpaid'?'مبلغ زائد عن الطلب':'حوالة غير مطابقة')}
       catch(error){console.error('TRC20 alert failed',String(error))}
       ctx.waitUntil(flushOutbox(db,env));
     }
-    if(result.status!=='confirmed')return sendText(env,uid,({
+    if(!['confirmed','partial'].includes(result.status))return sendText(env,uid,({
       pending:'🔍 لم نعثر على حوالة مؤكدة تطابق رقم TXID المرسل.\n⚠️ تأكد من صحة الرقم والشبكة TRC20 والمبلغ المطلوب.\n⏳ إذا حوّلت حديثاً، أعد المحاولة بعد دقائق.\n🔒 لم يُضف أي رصيد إلى محفظتك.',
-      mismatch:'❌ الحوالة لا تطابق العنوان والمبلغ المطلوب. لن يضاف أي رصيد.',
+      mismatch:'❌ الحوالة لا تطابق عنوان الاستلام أو عقد USDT الصحيح. لم يُضف رصيد.',
+      overpaid:'⚠️ المبلغ المحوَّل أكثر من مبلغ الطلب. لم تتم إضافته آلياً؛ تواصل مع الدعم لمراجعته.',
+      late:'⏰ الحوالة خارج مهلة الطلب (15 دقيقة). لم تُضف تلقائياً؛ تواصل مع الدعم.',
       expired:'⏰ انتهت صلاحية طلب الدفع. تواصل مع الدعم إذا حولت بالفعل.',
       unconfigured:'⛔ خدمة التحقق غير مهيأة لدى الإدارة. لم يتم شحن الرصيد.',
       invalid:'❌ TXID غير صالح.'
     })[result.status]||'⚠️ لم نجد حوالة مؤكدة مطابقة لهذه العملية. تأكد من الشبكة ورقم المعاملة.');
-    let settled;
-    try{settled=await creditVerifiedTrc20(db,uid,intent.id,txid,env,result.blockTimestamp)}
-    catch(e){console.error('TRC20 settlement rejected',String(e));return sendText(env,uid,'⚠️ لم نتمكن من تسوية الحوالة بأمان. لا تعاود التحويل؛ تواصل مع الدعم ومعك TXID.');}
-    await clearSession(db,uid);
+    let payment;
+    try{payment=await acceptVerifiedTrc20Part(db,uid,intent.id,result,env)}
+    catch(e){console.error('TRC20 installments could not be recorded',String(e));
+      return sendText(env,uid,'⚠️ تعذّر حفظ الدفعة بأمان. لا تكرر التحويل؛ تواصل مع الدعم ومعك TXID.');}
+    if(payment.status==='duplicate')return sendText(env,uid,'⚠️ رقم TXID هذا مسجّل سابقاً. لا يمكن احتساب نفس الحوالة مرتين.');
+    if(payment.status==='overpaid'){
+      try{await notifyTrc20Alert(db,env,intent,txid,'مجموع الدفعات يتجاوز المبلغ المطلوب')}catch{}
+      ctx.waitUntil(flushOutbox(db,env));
+      return sendText(env,uid,'⚠️ مجموع الدفعات يتجاوز المبلغ المطلوب. تواصل مع الدعم؛ لم تتم إضافة هذا التحويل.');
+    }
+    if(payment.status!=='credited'&&payment.status!=='partial')
+      return sendText(env,uid,'⏰ انتهت صلاحية الطلب أو تغيرت حالة التحويل. لم يُشحن رصيد؛ تواصل مع الدعم.');
     ctx.waitUntil(flushOutbox(db,env));
+    if(payment.status==='partial'){
+      return sendText(env,uid,
+        '✅ تم التأكد من الدفعة وحفظها ضمن طلب الشحن.\n\n💰 المبلغ المطلوب: '+formatUsdtMicro(intent.expected_micro)+
+        '\n✅ مجموع المستلم: '+formatUsdtMicro(payment.receivedMicro)+
+        '\n💸 المتبقي للتحويل: '+formatUsdtMicro(payment.remainingMicro)+
+        '\n\n⏱️ أكمل المتبقي خلال مهلة الطلب الأصلية (15 دقيقة).\n🧾 بعد الحوالة المكملة، أرسل TXID الجديد هنا.\n🔒 رصيد المحفظة لن يُشحن إلا بعد اكتمال المبلغ.',
+        keyboard([button('❌ إلغاء الطلب','topup_cancel','danger')]));
+    }
+    await clearSession(db,uid);
     const account=await getUser(db,uid);
-    return sendText(env,uid,'✅ تم التحقق من حوالتك وشحن محفظتك تلقائياً!\n💰 المضاف: '+formatIQD(settled.amount_iqd)+
-      '\n💳 رصيدك: '+formatIQD(account.wallet_balance_iqd)+'\n🧾 رقم الطلب: #'+settled.id,
+    return sendText(env,uid,'✅ اكتملت جميع دفعات USDT، وتم شحن محفظتك تلقائياً!\n💰 المضاف: '+formatIQD(payment.topup.amount_iqd)+
+      '\n💳 رصيدك: '+formatIQD(account.wallet_balance_iqd)+'\n🧾 رقم الطلب: #'+payment.topup.id,
       keyboard([button('💳 محفظتي','wallet','success')],[button('📦 طلباتي','orders','primary')]));
   }
   if(session.action==='topup_evidence'||session.action==='topup_confirm'){
@@ -634,7 +654,8 @@ async function handleCallback(db,env,ctx,q){
     if(!intent||intent.status!=='waiting'||intent.expires_at<=Math.floor(Date.now()/1000))
       return sendText(env,uid,'⏰ انتهى طلب الدفع. تواصل مع الدعم إذا حولت فعلاً.');
     await setSession(db,uid,'topup_trc20_txid',{intentId:id});
-    return sendText(env,uid,'✅ إذا حولت '+formatUsdtMicro(intent.expected_micro)+
+    const progress=await trc20PaymentProgress(db,id);
+    return sendText(env,uid,'✅ إذا حولت '+formatUsdtMicro(progress?.remainingMicro??intent.expected_micro)+
       ' على شبكة TRC20 إلى العنوان المحدد، أرسل الآن رقم المعاملة TXID من سجل السحب في Binance.\n\n🔒 لن يُضاف أي رصيد إلا بعد مطابقة الحوالة المؤكدة.\nللإلغاء /cancel.',
       keyboard([button('❌ إلغاء الطلب','topup_cancel','danger')]));
   }
