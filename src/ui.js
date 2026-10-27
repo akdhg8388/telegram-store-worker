@@ -1,6 +1,7 @@
 import {categoryButton} from './category-emoji.js';
 import {methodList,paymentMethod,paymentName,paymentButton} from './payment-methods.js';
 import {formatTransferMinor,transferSummary} from './payment-quote.js';
+import {formatUsdtMicro} from './trc20-payments.js';
 import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
@@ -255,6 +256,16 @@ export async function topupMethods(db,env,uid,quote,messageId=null){
  rows.push([button('↩️ رجوع إلى المبالغ','topup','danger')]);
  const text=`💳 اختيار طريقة الشحن\n\n💰 المبلغ المطلوب: ${formatQuote(quote)}\n\n${methods.length?'اختر طريقة التحويل من الخيارات المتاحة.':'⚠️ لا توجد طرق شحن مهيأة حالياً.'}${instructions?'\n\n'+short(instructions,900):''}`;
  return transientText(env,uid,text,keyboard(...rows),messageId);
+}
+export async function topupTrc20(db,env,uid,intent,quote,messageId=null){
+ const body='🔴 شحن المحفظة عبر USDT TRC20\n\n💰 رصيد المحفظة المطلوب: '+formatQuote(quote)+
+   '\n💸 قيمة التحويل الدقيقة: '+formatUsdtMicro(intent.expectedUsdtMicro)+
+   '\n🌐 الشبكة: TRON (TRC20) فقط\n🏦 عنوان الاستلام:\n'+intent.receiver+
+   '\n\n⚠️ أرسل المبلغ الدقيق بالكامل. أي مبلغ مختلف أو شبكة أخرى لن يقبلها التحقق التلقائي.\n⏳ صلاحية الطلب 30 دقيقة. بعد التحويل اضغط «✅ دفعت» وأرسل TXID (رقم معاملة السحب).';
+ return transientText(env,uid,body,keyboard(
+   [button('💸 المطلوب: '+formatUsdtMicro(intent.expectedUsdtMicro),'topup_amount_info:'+intent.intentId,'success')],
+   [button('✅ دفعت','topup_trc20_paid:'+intent.intentId,'success')],
+   [button('❌ إلغاء الطلب','topup_cancel','danger')]),messageId);
 }
 export async function topupEvidence(db,env,uid,quote,method,messageId=null){
  const [m,instructions]=await Promise.all([paymentMethod(db,env,method),getSetting(db,'topup_instructions','')]);

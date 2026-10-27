@@ -17,6 +17,7 @@ import {boldEntities} from './v25-format.js';
 import {paymentMethod,paymentName} from './payment-methods.js';
 import {paymentQuote,transferSummary} from './payment-quote.js';
 import {trackTopupView,cleanTopupViews} from './topup-cleanup.js';
+import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20TxidIsValid,verifyTrc20Payment,creditVerifiedTrc20,formatUsdtMicro} from './trc20-payments.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 
@@ -115,6 +116,35 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     await setSession(db,uid,'topup_choose_method',extended);
     return ui.topupMethods(db,env,uid,extended);
   }
+  if(session.action==='topup_trc20_txid'){
+    await trackTopupView(db,uid,message.message_id);
+    const intent=await findTrc20Intent(db,uid,session.payload?.intentId);
+    if(!intent||intent.status!=='waiting'||Number(intent.expires_at)<=Math.floor(Date.now()/1000)){
+      await clearSession(db,uid);return sendText(env,uid,'⏰ انتهى طلب التحويل. تواصل مع الدعم إذا حولت فعلاً.');
+    }
+    if(!trc20TxidIsValid(t))return sendText(env,uid,'❌ أرسل TXID الحقيقي (64 خانة) من سجل السحب في Binance.');
+    const txid=t.toLowerCase();
+    if(await db.prepare('SELECT id FROM trc20_payment_intents WHERE txid=?').bind(txid).first())
+      return sendText(env,uid,'⚠️ هذه الحوالة مستخدمة سابقاً. لا يمكن شحن رصيد مرتين بنفس المعاملة.');
+    let result;
+    try{result=await verifyTrc20Payment(env,intent,txid)}
+    catch(e){console.error('TRC20 verification failed',String(e));return sendText(env,uid,'⏳ تعذر التحقق من الشبكة حالياً. أعد إرسال TXID لاحقاً؛ لم نضف أي رصيد.');}
+    if(result.status!=='confirmed')return sendText(env,uid,({
+      pending:'⏳ لم يتم تأكيد الحوالة على الشبكة بعد. أعد إرسال TXID بعد دقائق.',
+      mismatch:'❌ الحوالة لا تطابق العنوان والمبلغ المطلوب. لن يضاف أي رصيد.',
+      expired:'⏰ انتهت صلاحية طلب الدفع. تواصل مع الدعم إذا حولت بالفعل.',
+      unconfigured:'⛔ خدمة التحقق غير مهيأة لدى الإدارة. لم يتم شحن الرصيد.',
+      invalid:'❌ TXID غير صالح.'
+    })[result.status]||'⚠️ لم نجد حوالة مؤكدة مطابقة لهذه العملية. تأكد من الشبكة ورقم المعاملة.');
+    let settled;
+    try{settled=await creditVerifiedTrc20(db,uid,intent.id,txid)}
+    catch(e){console.error('TRC20 settlement rejected',String(e));return sendText(env,uid,'⚠️ لم نتمكن من تسوية الحوالة بأمان. لا تعاود التحويل؛ تواصل مع الدعم ومعك TXID.');}
+    await clearSession(db,uid);
+    const account=await getUser(db,uid);
+    return sendText(env,uid,'✅ تم التحقق من حوالتك وشحن محفظتك تلقائياً!\n💰 المضاف: '+formatIQD(settled.amount_iqd)+
+      '\n💳 رصيدك: '+formatIQD(account.wallet_balance_iqd)+'\n🧾 رقم الطلب: #'+settled.id,
+      keyboard([button('💳 محفظتي','wallet','success')],[button('📦 طلباتي','orders','primary')]));
+  }
   if(session.action==='topup_evidence'||session.action==='topup_confirm'){
     await trackTopupView(db,uid,message.message_id);
     if(!t || t.length>180 || t==='/skip')return sendText(env,uid,'أرسل رقم حوالة صحيحاً لا يتجاوز 180 حرفاً، أو أرفق صورة إيصال.');
@@ -185,7 +215,12 @@ async function handleMessage(db,env,ctx,message){
   if(text==='/profile'){await clearSession(db,uid);return ui.profile(db,env,uid)}
   if(text==='/history'||text==='/transactions'){await clearSession(db,uid);return ui.transactions(db,env,uid)}
   if(text==='/favorites'){await clearSession(db,uid);return ui.favorites(db,env,uid)}
-  if(text==='/cancel'){await clearSession(db,uid);return ui.home(db,env,uid)}
+  if(text==='/cancel'){
+    const current=await getSession(db,uid);
+    if(current?.payload?.intentId)await cancelTrc20Intent(db,uid,current.payload.intentId);
+    await clearSession(db,uid);
+    return ui.home(db,env,uid);
+  }
   if(text==='/admin')return adminMenu(db,env,uid);
   if(text==='/orders'){await clearSession(db,uid);return ui.orders(db,env,uid)}
   if(text==='/purchases'){await clearSession(db,uid);return purchaseList(db,env,uid)}
@@ -548,11 +583,18 @@ async function handleCallback(db,env,ctx,q){
   }
   if(data.startsWith('topup_amount_info:')){
     const session=await getSession(db,uid);
-    const ok=session?.action==='topup_evidence'&&session.payload?.quoteKey===data.slice('topup_amount_info:'.length);
+    const id=data.slice('topup_amount_info:'.length);
+    if(session?.action==='topup_trc20_txid'&&session.payload.intentId===id){
+      const intent=await findTrc20Intent(db,uid,id);
+      return answerCallback(env,q.id,intent?'حوّل المبلغ الدقيق '+formatUsdtMicro(intent.expected_micro):'انتهى الطلب');
+    }
+    const ok=session?.action==='topup_evidence'&&session.payload?.quoteKey===id;
     return answerCallback(env,q.id,ok?transferSummary(session.payload):'انتهت هذه الخطوة. ابدأ طلباً جديداً.');
   }
   if(data==='topup_cancel'){
     await trackTopupView(db,uid,q.message?.message_id);
+    const pending=await getSession(db,uid);
+    if(pending?.payload?.intentId)await cancelTrc20Intent(db,uid,pending.payload.intentId);
     await clearSession(db,uid);
     // Send a fresh clean wallet message, then remove only tracked top-up screens.
     const result=await ui.wallet(db,env,uid);
@@ -580,6 +622,16 @@ async function handleCallback(db,env,ctx,q){
     await setSession(db,uid,'topup_custom',{currency:w.currency});
     return sendText(env,uid,`✏️ أدخل المبلغ المخصص بعملة ${w.currency}\n\n${w.currency==='USD'?'مثال: 25.50':'مثال: 25000'}\nللإلغاء: /cancel`);
   }
+  if(data.startsWith('topup_trc20_paid:')){
+    const id=data.slice('topup_trc20_paid:'.length);
+    const intent=await findTrc20Intent(db,uid,id);
+    if(!intent||intent.status!=='waiting'||intent.expires_at<=Math.floor(Date.now()/1000))
+      return sendText(env,uid,'⏰ انتهى طلب الدفع. تواصل مع الدعم إذا حولت فعلاً.');
+    await setSession(db,uid,'topup_trc20_txid',{intentId:id});
+    return sendText(env,uid,'✅ إذا حولت '+formatUsdtMicro(intent.expected_micro)+
+      ' على شبكة TRC20 إلى العنوان المحدد، أرسل الآن رقم المعاملة TXID من سجل السحب في Binance.\n\n🔒 لن يُضاف أي رصيد إلا بعد مطابقة الحوالة المؤكدة.\nللإلغاء /cancel.',
+      keyboard([button('❌ إلغاء الطلب','topup_cancel','danger')]));
+  }
   if(data.startsWith('topup_method:')){
     await trackTopupView(db,uid,q.message?.message_id);
     const [,method,quoteKey]=data.split(':');
@@ -588,6 +640,14 @@ async function handleCallback(db,env,ctx,q){
     const selected=await paymentMethod(db,env,method);
     if(!selected?.enabled||!selected.visible)return sendText(env,uid,'هذه الوسيلة غير متاحة حالياً.');
     if(!await receiverFor(db,env,method))return sendText(env,uid,'هذه الوسيلة غير مهيأة لدى الإدارة بعد.');
+    if(isTrc20Method(method)){
+      if(!env.TRONGRID_API_KEY)return sendText(env,uid,'⛔ التحقق من TRC20 غير متاح حالياً. اختر وسيلة أخرى.');
+      let intent;
+      try{intent=await newTrc20Intent(db,uid,session.payload,selected)}
+      catch(e){console.error('TRC20 intent not created',String(e));return sendText(env,uid,'⛔ تعذر تجهيز طلب TRC20. تأكد من العنوان والرسوم، أو استخدم وسيلة أخرى.');}
+      await setSession(db,uid,'topup_trc20_txid',{intentId:intent.intentId});
+      return ui.topupTrc20(db,env,uid,intent,session.payload,q.message?.message_id);
+    }
     const transfer=paymentQuote(selected,session.payload);
     if(selected.quote_enabled!==0&&!transfer)return sendText(env,uid,'⚠️ إعداد احتساب مبلغ التحويل غير صالح؛ تواصل مع الإدارة.');
     const payload={...session.payload,method,reference:null,proofFileId:null,proofUniqueId:null,
