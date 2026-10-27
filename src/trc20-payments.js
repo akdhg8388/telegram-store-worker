@@ -205,7 +205,7 @@ export async function acceptVerifiedTrc20Part(db,uid,id,verified,env={}){
      "(SELECT COALESCE(SUM(p.amount_micro),0) FROM trc20_payment_parts p WHERE p.intent_id=i.id)+? <= i.expected_micro) "+
      "AND NOT EXISTS(SELECT 1 FROM trc20_payment_intents WHERE txid=?)")
      .bind(txid,id,amount,time,id,uid,intent.receiver,time,amount,txid),
-   db.prepare("UPDATE trc20_payment_quotes SET status='used' WHERE intent_id=? AND status='waiting' AND amount_micro=? AND created_at*1000<=?").bind(id,amount,time),
+   db.prepare("UPDATE trc20_payment_quotes SET status='used' WHERE intent_id=? AND status='waiting' AND amount_micro=? AND created_at*1000<=? AND EXISTS(SELECT 1 FROM trc20_payment_parts WHERE txid=? AND intent_id=?)").bind(id,amount,time,txid,id),
    db.prepare("UPDATE trc20_payment_intents SET status='credited',txid=?,credited_at=unixepoch() "+
      "WHERE id=? AND user_tg_id=? AND status='waiting' AND expires_at>unixepoch() "+
      "AND (SELECT COALESCE(SUM(amount_micro),0) FROM trc20_payment_parts WHERE intent_id=?)=expected_micro "+
