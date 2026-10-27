@@ -30,7 +30,7 @@ test('V29 methods are gated and editable without changing historical IDs',async(
 test('V29 migration preserves settled and pending wallet topups and admin references',()=>{
  const c=new DatabaseSync(':memory:');c.exec('PRAGMA foreign_keys=ON;');
  try{
- for(const n of names.filter(x=>!x.startsWith('0017_')&&!x.startsWith('0018_')&&!x.startsWith('0019_')))c.exec(readFileSync(new URL('../migrations/'+n,import.meta.url),'utf8'));
+ for(const n of names.filter(x=>!x.startsWith('0017_')&&!x.startsWith('0018_')&&!x.startsWith('0019_')&&!x.startsWith('0020_')))c.exec(readFileSync(new URL('../migrations/'+n,import.meta.url),'utf8'));
  c.exec("INSERT INTO users(tg_id,first_name) VALUES(101,'Customer'),(991,'Owner')");
  c.exec("INSERT INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key) VALUES(101,25000,'topup','prior-credit')");
  c.exec("INSERT INTO topup_requests(user_tg_id,method,amount_iqd,transfer_reference,status) VALUES(101,'superqi',12000,'ref-1','pending')");
