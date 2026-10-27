@@ -20,6 +20,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       ADMIN_ID: ${{ secrets.ADMIN_ID }}
+      TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
       CI: 'true'
       NO_COLOR: '1'
     steps:
@@ -69,6 +70,9 @@ jobs:
           set -euo pipefail
           printf '%s' "$TELEGRAM_BOT_TOKEN" | npx wrangler secret put TELEGRAM_BOT_TOKEN
           printf '%s' "$ADMIN_ID" | npx wrangler secret put ADMIN_ID
+          if [ -n "${TRONGRID_API_KEY:-}" ]; then
+            printf '%s' "$TRONGRID_API_KEY" | npx wrangler secret put TRONGRID_API_KEY
+          fi
           # Stable per bot token: a failed deploy cannot repeatedly rotate the webhook secret.
           WEBHOOK_SECRET="$(node -e "const c=require('node:crypto');process.stdout.write(c.createHmac('sha256',process.env.TELEGRAM_BOT_TOKEN).update('my-store-telegram-webhook:v1').digest('hex'))")"
           echo "::add-mask::$WEBHOOK_SECRET"
