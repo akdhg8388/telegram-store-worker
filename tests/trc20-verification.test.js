@@ -49,7 +49,7 @@ test('Confirmed TRC20 receipt validates exact token, receiver, transfer amount a
  const ok=inspectTrc20Receipt(receipt,intent,id,receiverHex);
  assert.equal(ok.status,'confirmed');
  assert.equal(ok.txid,id);
- assert.equal(inspectTrc20Receipt({...receipt,log:[{...event,data:'0'.repeat(63)+'1'}]},intent,id,receiverHex).status,'mismatch');
+ assert.equal(inspectTrc20Receipt({...receipt,log:[{...event,data:'0'.repeat(63)+'1'}]},intent,id,receiverHex).status,'partial');
  assert.equal(inspectTrc20Receipt({...receipt,log:[{...event,address:'0'.repeat(40)}]},intent,id,receiverHex).status,'invalid');
  assert.equal(inspectTrc20Receipt({...receipt,log:[{...event,topics:[event.topics[0],event.topics[1],'0'.repeat(64)]}]},intent,id,receiverHex).status,'mismatch');
  assert.equal(inspectTrc20Receipt({...receipt,receipt:{result:'FAILED'}},intent,id,receiverHex).status,'invalid');
