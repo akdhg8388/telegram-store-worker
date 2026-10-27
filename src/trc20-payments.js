@@ -91,32 +91,66 @@ export function inspectTrc20Transfer(event,intent){
  if(actual!==BigInt(intent.expected_micro))return {status:'mismatch'};
  return {status:'confirmed',txid:String(event.transaction_id).toLowerCase(),blockTimestamp:ts};
 }
+// TXID fallback reads ONE final execution receipt by its exact hash.
+// It doesn't scan/paginate wallet history, which reduces lookup latency.
+// Addresses in TRON receipt logs use EVM's 20-byte hex format.
+const BASE58_ALPHABET='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const USDT_CONTRACT_LOG_HEX='a614f803b6fd780986a42c78ec9c7f77e6ded13c';
+const TRANSFER_TOPIC='ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+export async function tronAddressHex(address){
+ if(!trc20AddressIsValid(address))return null;
+ let value=0n;
+ for(const c of address){
+   const digit=BASE58_ALPHABET.indexOf(c);
+   if(digit<0)return null;
+   value=value*58n+BigInt(digit);
+ }
+ const bytes=new Uint8Array(25);
+ for(let i=24;i>=0;i--){bytes[i]=Number(value&255n);value>>=8n;}
+ if(value!==0n||bytes[0]!==0x41)return null;
+ // TRON Base58Check: double SHA256 protects against mistyped addresses.
+ const digest1=await crypto.subtle.digest('SHA-256',bytes.slice(0,21));
+ const digest2=new Uint8Array(await crypto.subtle.digest('SHA-256',digest1));
+ for(let i=0;i<4;i++)if(bytes[21+i]!==digest2[i])return null;
+ return [...bytes.slice(1,21)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+export function inspectTrc20Receipt(receipt,intent,txid,recipientHex){
+ if(String(receipt?.id||'').toLowerCase()!==txid)return {status:'pending'};
+ if(receipt?.result==='FAILED'||receipt?.receipt?.result==='FAILED')return {status:'invalid'};
+ if(receipt?.receipt?.result!=='SUCCESS')return {status:'pending'};
+ const time=Number(receipt.blockTimeStamp);
+ if(!Number.isSafeInteger(time)||time<=0)return {status:'invalid'};
+ const transferLogs=(Array.isArray(receipt.log)?receipt.log:[]).filter(log=>{
+   const contract=String(log.address||'').replace(/^0x/i,'').toLowerCase().replace(/^41(?=[a-f0-9]{40}$)/,'');
+   const topic0=String(log.topics?.[0]||'').replace(/^0x/i,'').toLowerCase();
+   return contract===USDT_CONTRACT_LOG_HEX&&topic0===TRANSFER_TOPIC;
+ });
+ let foundRecipient=false;
+ for(const log of transferLogs){
+   const topic=String(log.topics?.[2]||'').replace(/^0x/i,'').toLowerCase();
+   if(!/^[a-f0-9]{64}$/.test(topic)||topic.slice(-40)!==recipientHex)continue;
+   foundRecipient=true;
+   const amount=String(log.data||'').replace(/^0x/i,'');
+   if(!/^[a-fA-F0-9]{64}$/.test(amount))continue;
+   if(BigInt('0x'+amount)!==BigInt(intent.expected_micro))continue;
+   if(time<Number(intent.created_at)*1000||time>Number(intent.expires_at)*1000)return {status:'late'};
+   return {status:'confirmed',txid,blockTimestamp:time};
+ }
+ return {status:foundRecipient||transferLogs.length?'mismatch':'invalid'};
+}
 export async function verifyTrc20Payment(env,intent,txid){
  const id=String(txid||'').trim().toLowerCase();
  if(!TXID.test(id))return {status:'invalid'};
  if(!env.TRONGRID_API_KEY||configuredTrc20Receiver(env)!==intent?.receiver)return {status:'unconfigured'};
  if(intent.status!=='waiting'||Number(intent.expires_at)<=Math.floor(Date.now()/1000))return {status:'expired'};
- const url=trc20TransferUrl(intent.receiver,Number(intent.created_at)*1000);
- let candidate=null;
- // TXID fallback can paginate; the CRON path is strictly ONE API request.
- for(let i=0;i<3;i++){
-   const j=await tronFetch(url.toString(),env);
-   if(!Array.isArray(j.data))throw new Error('TRONGRID_INVALID_RESPONSE');
-   candidate=j.data.find(x=>String(x.transaction_id||'').toLowerCase()===id) || null;
-   if(candidate)break;
-   if(!j.data.length||!j.meta?.fingerprint)break;
-   url.searchParams.set('fingerprint',j.meta.fingerprint);
- }
- if(!candidate)return {status:'pending'};
- const checked=inspectTrc20Transfer(candidate,intent);
- if(checked.status!=='confirmed')return checked;
- // On-demand verification also validates the successful Solidity receipt.
+ const recipientHex=await tronAddressHex(intent.receiver);
+ if(!recipientHex)return {status:'unconfigured'};
+ // SolidityNode responds only after the transaction is final. Its event logs
+ // bind the actual TRC20 token contract, recipient and exact micro-USDT amount.
  const receipt=await tronFetch('https://api.trongrid.io/walletsolidity/gettransactioninfobyid',env,{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:id})
  });
- if(String(receipt.id||'').toLowerCase()!==id||receipt.receipt?.result!=='SUCCESS')
-   return {status:'pending'};
- return checked;
+ return inspectTrc20Receipt(receipt,intent,id,recipientHex);
 }
 export async function creditVerifiedTrc20(db,uid,id,txid,env={},blockTimestamp=null){
  if(!trc20TxidIsValid(txid))throw new Error('INVALID_TXID');

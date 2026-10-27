@@ -135,7 +135,7 @@ async function handleTextState(db,env,ctx,uid,message,session) {
       ctx.waitUntil(flushOutbox(db,env));
     }
     if(result.status!=='confirmed')return sendText(env,uid,({
-      pending:'⏳ لم يتم تأكيد الحوالة على الشبكة بعد. أعد إرسال TXID بعد دقائق.',
+      pending:'🔍 لم نعثر على حوالة مؤكدة تطابق رقم TXID المرسل.\n⚠️ تأكد من صحة الرقم والشبكة TRC20 والمبلغ المطلوب.\n⏳ إذا حوّلت حديثاً، أعد المحاولة بعد دقائق.\n🔒 لم يُضف أي رصيد إلى محفظتك.',
       mismatch:'❌ الحوالة لا تطابق العنوان والمبلغ المطلوب. لن يضاف أي رصيد.',
       expired:'⏰ انتهت صلاحية طلب الدفع. تواصل مع الدعم إذا حولت بالفعل.',
       unconfigured:'⛔ خدمة التحقق غير مهيأة لدى الإدارة. لم يتم شحن الرصيد.',
