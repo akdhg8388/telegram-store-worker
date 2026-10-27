@@ -263,11 +263,17 @@ export async function topupTrc20(db,env,uid,intent,quote,messageId=null){
    '\n🌐 الشبكة: TRON (TRC20) فقط\n🏦 عنوان الاستلام:\n'+intent.receiver+
    '\n\n⚠️ أرسل المبلغ الدقيق بالكامل. أي مبلغ مختلف أو شبكة أخرى لن يقبلها التحقق التلقائي.\n⏳ صلاحية الطلب 15 دقيقة. يراقب البوت التحويل تلقائياً كل دقيقة. زر «✅ دفعت» لإرسال TXID كخيار احتياطي.';
  const markup=keyboard(
+   [{text:'📋 نسخ عنوان محفظة TRC20',copy_text:{text:intent.receiver},style:'primary'}],
    [button('💸 المطلوب: '+formatUsdtMicro(intent.expectedUsdtMicro),'topup_amount_info:'+intent.intentId,'success')],
    [button('✅ دفعت','topup_trc20_paid:'+intent.intentId,'success')],
    [button('❌ إلغاء الطلب','topup_cancel','danger')]);
+ // Telegram copies the address natively (no new callback or database query).
+ // Code formatting also makes the address easier to select in its caption.
+ const addressOffset=body.indexOf(intent.receiver);
  return sendPhotoCard(env,uid,TRC20_QR_URL,body,markup,{
-   messageId,onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg)}
+   messageId,preserveText:true,
+   entities:addressOffset>=0?[{type:'code',offset:addressOffset,length:intent.receiver.length}]:[],
+   onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg)}
  });
 }
 export async function topupEvidence(db,env,uid,quote,method,messageId=null){
