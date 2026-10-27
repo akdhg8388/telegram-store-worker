@@ -2,6 +2,9 @@ import {paymentQuote} from './payment-quote.js';
 import {formatIQD,adminIds} from './common.js';
 
 export const TRC20_METHOD='usdt_trc20';
+// Public receiving address (never a private key); the QR asset encodes the same address.
+export const DEFAULT_TRC20_RECEIVER='TMLhhXpUtAPkaG8Lw6XWuTzzJyou5wMvVR';
+export const TRC20_QR_URL='https://raw.githubusercontent.com/akdhg8388/telegram-store-worker/main/assets/usdt-trc20-qr.png';
 export const USDT_CONTRACT='TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 export const TRC20_TTL_SECONDS=15*60;
 const TXID=/^[a-fA-F0-9]{64}$/;
@@ -14,7 +17,7 @@ export function formatUsdtMicro(micro){
  return Math.floor(micro/1000000)+'.'+String(micro%1000000).padStart(6,'0')+' USDT';
 }
 export function configuredTrc20Receiver(env){
- const receiver=String(env?.WALLET_ADDRESS||'').trim();
+ const receiver=String(env?.WALLET_ADDRESS||DEFAULT_TRC20_RECEIVER).trim();
  return trc20AddressIsValid(receiver)?receiver:null;
 }
 export async function newTrc20Intent(db,uid,quote,method,env={}){

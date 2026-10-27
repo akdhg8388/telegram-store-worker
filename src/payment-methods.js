@@ -1,4 +1,5 @@
 import {getSetting} from './settings.js';
+import {DEFAULT_TRC20_RECEIVER,TRC20_QR_URL} from './trc20-payments.js';
 import {button} from './common.js';
 const defaults={zain_balance:'ZAIN_BALANCE_RECEIVER',superqi:'SUPERQI_RECEIVER',binance:'BINANCE_RECEIVER',asiacell:'ASIACELL_RECEIVER',zaincash:'ZAINCASH_RECEIVER'};
 export const LEGACY_KEYS=Object.freeze(Object.keys(defaults));
@@ -33,7 +34,8 @@ export async function methodList(db,env,{activeOnly=false}={}){
  const values=await Promise.all(legacyKeys.map(k=>getSetting(db,k,String(env[defaults[rows.find(x=>x.legacy_setting_key===k)?.method_key]]||''))));
  const fallback=Object.fromEntries(legacyKeys.map((k,i)=>[k,values[i]]));
  const all=rows.map(x=>({...x,receiver:x.method_key==='usdt_trc20'
-   ?String(env.WALLET_ADDRESS||'').trim():x.receiver_ar||fallback[x.legacy_setting_key]||''}));
+   ?String(env.WALLET_ADDRESS||DEFAULT_TRC20_RECEIVER).trim():x.receiver_ar||fallback[x.legacy_setting_key]||'',
+   ...(x.method_key==='usdt_trc20'?{photo_file_id:TRC20_QR_URL}: {})}));
  return activeOnly?all.filter(x=>x.enabled&&x.visible&&x.receiver.trim()&&
    (x.method_key!=='usdt_trc20'||(!!env.TRONGRID_API_KEY&&/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(x.receiver)))):all;
 }
@@ -41,9 +43,9 @@ export async function paymentMethod(db,env,key){
  if(!/^[a-z][a-z0-9_]{0,31}$/.test(String(key||'')))return null;
  const m=await db.prepare('SELECT * FROM payment_methods WHERE method_key=?').bind(key).first();
  if(!m)return null;
- const receiver=key==='usdt_trc20'?String(env.WALLET_ADDRESS||'').trim():
+ const receiver=key==='usdt_trc20'?String(env.WALLET_ADDRESS||DEFAULT_TRC20_RECEIVER).trim():
    m.receiver_ar || (m.legacy_setting_key?await getSetting(db,m.legacy_setting_key,String(env[defaults[key]]||'')):'');
- return {...m,receiver};
+ return {...m,receiver,...(key==='usdt_trc20'?{photo_file_id:TRC20_QR_URL}: {})};
 }
 export function extractPaymentEmoji(message){
  const text=String(message.text||message.caption||'');

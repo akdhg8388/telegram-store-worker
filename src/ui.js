@@ -1,7 +1,7 @@
 import {categoryButton} from './category-emoji.js';
 import {methodList,paymentMethod,paymentName,paymentButton} from './payment-methods.js';
 import {formatTransferMinor,transferSummary} from './payment-quote.js';
-import {formatUsdtMicro} from './trc20-payments.js';
+import {formatUsdtMicro,TRC20_QR_URL} from './trc20-payments.js';
 import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
@@ -262,10 +262,13 @@ export async function topupTrc20(db,env,uid,intent,quote,messageId=null){
    '\n💸 قيمة التحويل الدقيقة: '+formatUsdtMicro(intent.expectedUsdtMicro)+
    '\n🌐 الشبكة: TRON (TRC20) فقط\n🏦 عنوان الاستلام:\n'+intent.receiver+
    '\n\n⚠️ أرسل المبلغ الدقيق بالكامل. أي مبلغ مختلف أو شبكة أخرى لن يقبلها التحقق التلقائي.\n⏳ صلاحية الطلب 15 دقيقة. يراقب البوت التحويل تلقائياً كل دقيقة. زر «✅ دفعت» لإرسال TXID كخيار احتياطي.';
- return transientText(env,uid,body,keyboard(
+ const markup=keyboard(
    [button('💸 المطلوب: '+formatUsdtMicro(intent.expectedUsdtMicro),'topup_amount_info:'+intent.intentId,'success')],
    [button('✅ دفعت','topup_trc20_paid:'+intent.intentId,'success')],
-   [button('❌ إلغاء الطلب','topup_cancel','danger')]),messageId);
+   [button('❌ إلغاء الطلب','topup_cancel','danger')]);
+ return sendPhotoCard(env,uid,TRC20_QR_URL,body,markup,{
+   messageId,onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg)}
+ });
 }
 export async function topupEvidence(db,env,uid,quote,method,messageId=null){
  const [m,instructions]=await Promise.all([paymentMethod(db,env,method),getSetting(db,'topup_instructions','')]);
