@@ -117,6 +117,7 @@ test('callback buys from wallet without generating any Stars invoice or admin ap
      await Promise.all(promises);
    };
    await run(300,'buy:1');
+   await run(302,'buy_qty:1:1');
    const nonce=JSON.parse(c.prepare('SELECT payload FROM user_sessions WHERE user_tg_id=101').get().payload).nonce;
    await run(301,'bulk_confirm:'+nonce);
    assert.equal(c.prepare('SELECT COUNT(*) n FROM wallet_purchases').get().n,1);

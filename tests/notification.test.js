@@ -77,6 +77,7 @@ test('rapid duplicate wallet purchase confirmation only debits once and reserves
    const click=(id,data,num)=>processUpdate(db,e,{waitUntil(x){jobs.push(x)}},
       {update_id:num,callback_query:{id,from:{id:101,first_name:'Shopper'},message:{message_id:555,chat:{id:101,type:'private'}},data}});
    await click('begin','buy:1',2999);
+   await click('quantity','buy_qty:1:1',29991);
    const pending=conn.prepare('SELECT payload FROM user_sessions WHERE user_tg_id=101').get();
    const nonce=JSON.parse(pending.payload).nonce;
    await click('cbA','bulk_confirm:'+nonce,3000);
