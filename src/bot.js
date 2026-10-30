@@ -12,6 +12,7 @@ import {amountInIQD,topupDecisionText,guardUser} from './moderation.js';
 import {submitSupport,handleSupportCallback,handleSupportReply,handleCustomerSupportCallback} from './support.js';
 import {handleUserCallback,handleUserText} from './admin-users.js';
 import {beginPurchase,commitPurchase,showReceipt,purchaseList} from './wallet-purchase.js';
+import {quantityPicker,bulkConfirm,commitBulkPurchase} from './bulk-purchase.js';
 import {readPurchaseViewIds,cleanupPurchaseViews,trackPurchaseView} from './purchase-views.js';
 import {boldEntities} from './v25-format.js';
 import {paymentMethod,paymentName} from './payment-methods.js';
@@ -106,6 +107,13 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     if(!amount)return sendText(env,uid,`أدخل مبلغاً صحيحاً من 1 إلى ${formatIQD(topup.amount_iqd)}، دون فواصل عشرية. يمكن اعتماد مبلغ أقل مما طلبه العميل.`);
     await clearSession(db,uid);
     return showTopupApproval(db,env,uid,id,amount);
+  }
+  if(session.action==='buy_custom_quantity'){
+    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر لا يستقبل مشتريات جديدة حالياً.');
+    const id=positiveInt(session.payload?.id),qty=positiveInt(t);
+    if(!qty||qty>100)return sendText(env,uid,'❌ أدخل عدداً صحيحاً بين 1 و100، ضمن المخزون المتوفر.');
+    const p=id?await getProduct(db,id):null;
+    return bulkConfirm(db,env,uid,p,qty);
   }
   if(session.action==='topup_custom'){
     const current=session.payload.currency||'IQD';
@@ -575,7 +583,11 @@ async function handleCallback(db,env,ctx,q){
     const m=data.match(/^category:(\d+):(\d+)$/);
     if(m)return ui.products(db,env,uid,Math.min(Number(m[2]),100),Number(m[1]),null,false,q.message?.message_id);
   }
-  if(data.startsWith('product:'))return ui.productView(db,env,uid,Number(data.split(':')[1]),q.message?.message_id);
+  if(data.startsWith('product:')){
+    const session=await getSession(db,uid);
+    if(['buy_custom_quantity','bulk_purchase_confirm'].includes(session?.action))await clearSession(db,uid);
+    return ui.productView(db,env,uid,Number(data.split(':')[1]),q.message?.message_id);
+  }
   if(data.startsWith('favorite:')){
     const productId=positiveInt(data.split(':')[1]);if(!productId)return;
     const p=await getProduct(db,productId);if(!p)return;
@@ -588,7 +600,38 @@ async function handleCallback(db,env,ctx,q){
     if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر لا يستقبل مشتريات جديدة حالياً.');
     const id=positiveInt(data.split(':')[1]);
     const p=id?await getProduct(db,id):null;
-    return beginPurchase(db,env,uid,p);
+    if(!p)return sendText(env,uid,'هذا المنتج غير متوفر.');
+    await clearSession(db,uid);
+    return quantityPicker(db,env,uid,p);
+  }
+  if(/^buy_qty:\d+:\d+$/.test(data)){
+    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر لا يستقبل مشتريات جديدة حالياً.');
+    const [,id,qty]=data.split(':');
+    return bulkConfirm(db,env,uid,await getProduct(db,Number(id)),Number(qty));
+  }
+  if(/^buy_custom:\d+$/.test(data)){
+    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر لا يستقبل مشتريات جديدة حالياً.');
+    const id=Number(data.split(':')[1]);
+    if(!await getProduct(db,id))return sendText(env,uid,'هذا المنتج غير متوفر.');
+    await setSession(db,uid,'buy_custom_quantity',{id});
+    const msg=await sendText(env,uid,'✏️ أدخل الكمية المطلوبة رقماً صحيحاً، بشرط ألا تتجاوز المخزون والحد الأقصى.\nللإلغاء /cancel.');
+    await trackPurchaseView(db,uid,msg);
+    return msg;
+  }
+  if(data==='buy_cancel'){
+    const stale=readPurchaseViewIds(db,uid).catch(()=>[]);
+    await clearSession(db,uid);
+    const result=await ui.products(db,env,uid,0,null,null,false,q.message?.message_id);
+    const exempt=!env.__callback_media?q.message?.message_id:null;
+    ctx.waitUntil(stale.then(ids=>cleanupPurchaseViews(db,env,uid,ids,exempt)));
+    return result;
+  }
+  if(data.startsWith('bulk_confirm:')){
+    if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر أوقف الشراء مؤقتاً.');
+    const result=await commitBulkPurchase(db,uid,data.slice('bulk_confirm:'.length));
+    if(!result)return sendText(env,uid,'انتهت صلاحية هذا التأكيد. افتح المنتج مجدداً.');
+    if(result.failed)return sendText(env,uid,'⛔ '+result.failed,keyboard([button('🛍️ المنتجات','products:0','primary')],[button('💳 المحفظة','wallet')],backRow()));
+    return showReceipt(db,env,uid,result.id);
   }
   if(data.startsWith('wallet_confirm:')){
     if(!await storeAcceptsOrders(db))return sendText(env,uid,'⏸️ المتجر أوقف استقبال الشراء مؤقتاً.');
