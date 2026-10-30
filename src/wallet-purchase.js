@@ -15,9 +15,9 @@ export async function purchaseAvailability(db,p){
     ?{ready:true,count:p.stock}: {ready:false,reason:'محتوى التسليم غير مهيأ بعد.'};
   if(p.fulfillment_mode==='unique'){
     const r=await db.prepare(`SELECT COUNT(*) AS n FROM product_delivery_items i
-       WHERE i.product_id=? AND i.used_by_purchase_id IS NULL
+       WHERE i.product_id=? AND i.used_by_purchase_id IS NULL AND i.bulk_purchase_id IS NULL
          AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
-           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL))` ).bind(p.id).first();
+           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL OR older.bulk_purchase_id IS NOT NULL))` ).bind(p.id).first();
     const available=Number(r?.n||0);
     return available>0?{ready:true,count:p.stock===null?available:Math.min(available,p.stock)}
       :{ready:false,reason:'نفدت بيانات التسليم الجاهزة.'};
@@ -136,7 +136,10 @@ export async function showReceipt(db,env,uid,id){
     '🛍️ '+name,'',
     detailsLabel+'\n'+details,'',
     usageLabel+'\n'+usage,'',
-    itemLabel+'\n'+short(sale.delivery_payload,1400),'',
+    itemLabel+'\n'+(Number(sale.quantity||1)>1&&sale.delivery_item_id?'🔑 الأكواد والروابط المستلمة تظهر في رسائل تالية.':short(sale.delivery_payload,1400)),'',
+    '📦 الكمية: '+Number(sale.quantity||1),
+    '💵 السعر قبل الخصم: '+format(Number(sale.unit_price_iqd||sale.price_iqd)*Number(sale.quantity||1)),
+    '🎁 خصم الكمية: '+Number(sale.discount_percent||0)+'%','',
     labels[0]+' '+format(sale.price_iqd),
     labels[1]+' '+format(sale.price_iqd),
     labels[2]+' '+format(remainder),
@@ -149,6 +152,23 @@ export async function showReceipt(db,env,uid,id){
     await sendPhotoCard(env,uid,sale.photo_file_id,text,markup,{
       entities,preserveText:true,onMessage:msg=>trackPurchaseView(db,uid,msg)
     });
+    if(Number(sale.quantity||1)>1 && sale.delivery_item_id){
+      const items=(await db.prepare('SELECT payload FROM product_delivery_items WHERE used_by_purchase_id=? OR bulk_purchase_id=? ORDER BY id LIMIT 100').bind(id,id).all()).results||[];
+      let part='🔑 الأكواد والروابط المستلمة (#'+sale.id+'):\n';
+      for(let i=0;i<items.length;i++){
+        const line='\n'+(i+1)+'. '+items[i].payload+'\n';
+        if(part.length+line.length>3300){
+          const extra=await sendText(env,uid,part,undefined,{preserveText:true});
+          await trackPurchaseView(db,uid,extra);
+          part='🔑 متابعة الأكواد (#'+sale.id+'):\n';
+        }
+        part+=line;
+      }
+      if(part.trim()){
+        const extra=await sendText(env,uid,part,keyboard([button('🏠 الرئيسية','home','primary')]),{preserveText:true});
+        await trackPurchaseView(db,uid,extra);
+      }
+    }
   }catch(e){console.error('Wallet receipt Telegram failure',String(e));}
   return sale;
 }
