@@ -85,3 +85,57 @@ test('quantity greater than real stock is rejected before any debit; discount ed
    assert.equal(c.prepare('SELECT discount_5_percent FROM products WHERE id=1').get().discount_5_percent,15);
  });}finally{c.close()}
 });
+
+test('numeric discount field callback routes and the full admin edit flow work',async()=>{
+ const {c,db}=fixture(6);
+ try{await mocked(async calls=>{
+   for(const [field,value] of [['discount_5_percent',12],['discount_20_percent',23],['discount_general_percent',15]]){
+     const cb='admin_product_field:1:'+field;
+     assert.equal(adminRoute(cb),true,cb);
+     const before=c.prepare('SELECT '+field+' AS v FROM products WHERE id=1').get().v;
+     assert.equal(await handleAdminCallback(db,env,101,cb),true); // customer cannot write
+     assert.equal(c.prepare('SELECT '+field+' AS v FROM products WHERE id=1').get().v,before);
+     assert.equal(await handleAdminCallback(db,env,991,cb),true);
+     const session=c.prepare('SELECT action,payload FROM user_sessions WHERE user_tg_id=991').get();
+     assert.equal(session.action,'owner_product_field');
+     assert.equal(JSON.parse(session.payload).field,field);
+     assert.ok(calls.some(x=>x.params.text?.includes('أرسل القيمة الجديدة')));
+     assert.equal(await handleAdminText(db,env,991,
+       {action:session.action,payload:JSON.parse(session.payload)},{text:String(value)}),true);
+     assert.equal(c.prepare('SELECT '+field+' AS v FROM products WHERE id=1').get().v,value);
+   }
+   assert.equal(adminRoute('admin_product_field:1:discount_5_percent;DROP TABLE products'),false);
+   assert.equal(adminRoute('admin_product_field:1:discount_general_percent:garbage'),false);
+ });}finally{c.close();}
+});
+test('general discount applies to one item, the better tier wins, amounts are immutable and debits occur once',async()=>{
+ const {c,db}=fixture(25);
+ try{await mocked(async()=>{
+   c.prepare("UPDATE products SET discount_general_percent=15,discount_5_percent=10,discount_20_percent=20 WHERE id=1").run();
+   let p=c.prepare('SELECT * FROM products WHERE id=1').get();
+   assert.equal(quantityPricing(p,1).total,850);
+   assert.equal(quantityPricing(p,5).total,4250);
+   assert.equal(quantityPricing(p,20).total,16000);
+   await bulkConfirm(db,env,101,p,5);
+   const sess=c.prepare('SELECT payload FROM user_sessions WHERE user_tg_id=101').get();
+   const nonce=JSON.parse(sess.payload).nonce;
+   const bought=await commitBulkPurchase(db,101,nonce);
+   assert.equal(bought.id,1);
+   assert.equal(c.prepare('SELECT price_iqd AS t,discount_percent AS d FROM wallet_purchases WHERE id=1').get().t,4250);
+   assert.equal(c.prepare('SELECT discount_percent AS d FROM wallet_purchases WHERE id=1').get().d,15);
+   assert.equal(c.prepare('SELECT wallet_balance_iqd AS b FROM users WHERE tg_id=101').get().b,45750);
+   assert.equal(c.prepare('SELECT COUNT(*) AS n FROM wallet_ledger WHERE kind=\'permitted_purchase\'').get().n,1);
+   // Another discount update cannot retroactively alter a completed purchase.
+   c.prepare("UPDATE products SET discount_general_percent=0,discount_5_percent=30 WHERE id=1").run();
+   assert.equal(c.prepare('SELECT price_iqd AS t FROM wallet_purchases WHERE id=1').get().t,4250);
+   assert.deepEqual(await commitBulkPurchase(db,101,nonce),{id:1,repeated:true});
+   p=c.prepare('SELECT * FROM products WHERE id=1').get();
+   assert.equal(quantityPricing(p,5).total,3500);
+   await bulkConfirm(db,env,101,p,5);
+   const newNonce=JSON.parse(c.prepare('SELECT payload FROM user_sessions WHERE user_tg_id=101').get().payload).nonce;
+   c.prepare("UPDATE products SET discount_general_percent=35").run();
+   const result=await commitBulkPurchase(db,101,newNonce);
+   assert.match(result.failed,/تغيّر السعر أو الخصم/);
+   assert.equal(c.prepare('SELECT COUNT(*) AS n FROM wallet_ledger WHERE kind=\'permitted_purchase\'').get().n,1);
+ });}finally{c.close();}
+});

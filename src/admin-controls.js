@@ -34,7 +34,7 @@ export function adminRoute(data){
   if(/^admin_pay_(?:quote:\w+|quote_toggle:\w+|quote_currency:\w+:(?:IQD|USD)|quote_mode:\w+:(?:none|fixed|percent)|quote_edit:\w+)$/.test(data))return true;
   if(/^admin_home_button_color:[a-z_]+(?::(?:default|primary|success|danger))?$/.test(data)
     || /^admin_pay_(?:edit:\w+:icon|icon_delete:\w+)$/.test(data))return true;
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_discounts:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_discounts:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z0-9_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -140,6 +140,7 @@ const PRODUCT_FIELDS={
   price_stars:{label:'⭐ سعر قديم (للسجل فقط)',integer:true,min:1,max:10000000},
   stock:{label:'📦 المخزون',integer:true,min:0,max:1000000,nullable:true},
   max_purchase_qty:{label:'📋 الحد الأقصى للطلب',integer:true,min:1,max:100},
+  discount_general_percent:{label:'🏷️ الخصم العام (%)',integer:true,min:0,max:90},
   discount_5_percent:{label:'🎁 خصم 5 قطع فأكثر (%)',integer:true,min:0,max:90},
   discount_20_percent:{label:'🎁 خصم 20 قطعة فأكثر (%)',integer:true,min:0,max:90},
   duration_months:{label:'🗓️ المدة بالأشهر',integer:true,min:1,max:120,nullable:true},
@@ -564,14 +565,16 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_product:'))await productDetail(db,env,uid,Number(data.split(':')[1]),messageId);
   else if(data.startsWith('admin_product_discounts:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
-    const p=await db.prepare('SELECT id,title,max_purchase_qty,discount_5_percent,discount_20_percent FROM products WHERE id=?').bind(id).first();
+    const p=await db.prepare('SELECT id,title,max_purchase_qty,discount_general_percent,discount_5_percent,discount_20_percent FROM products WHERE id=?').bind(id).first();
     if(!p)return true;
-    await sendOrEditText(env,uid,'🎁 خصومات الكميات للمنتج #'+id+'\n\n📦 '+short(p.title,100)+
+    await sendOrEditText(env,uid,'🎁 إدارة خصومات المنتج #'+id+'\n\n📦 '+short(p.title,100)+
       '\n📋 الحد الأقصى: '+p.max_purchase_qty+
+      '\n🏷️ الخصم العام لكل الكميات: '+p.discount_general_percent+'%'+
       '\n💚 خصم 5 فأكثر: '+p.discount_5_percent+'%'+
       '\n💚 خصم 20 فأكثر: '+p.discount_20_percent+'%'+
-      '\n\nكل نسبة مستقلة، و0% يعني بدون خصم. الإعدادات تخص هذا المنتج فقط.',keyboard(
+      '\n\nيُطبّق أعلى خصم مستحق فقط دون جمع النسب. و0% يعني بدون خصم. الإعدادات لهذا المنتج فقط.',keyboard(
       [button('📋 تعديل الحد الأقصى',`admin_product_field:${id}:max_purchase_qty`,'primary')],
+      [button('🏷️ تعديل الخصم العام',`admin_product_field:${id}:discount_general_percent`,'success')],
       [button('🎁 تعديل خصم 5',`admin_product_field:${id}:discount_5_percent`,'success')],
       [button('🎁 تعديل خصم 20',`admin_product_field:${id}:discount_20_percent`,'success')],
       [button('⬅️ المنتج',`admin_product:${id}`)],adminBack),messageId);

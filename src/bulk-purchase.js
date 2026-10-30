@@ -8,7 +8,7 @@ import {warrantyLine} from './warranty.js';
 
 export function quantityPricing(p,qty){
  if(!p||!Number.isSafeInteger(qty)||qty<1||qty>Math.min(100,Number(p.max_purchase_qty||100)))return null;
- const unit=Number(p.price_iqd),discount=qty>=20?Number(p.discount_20_percent||0):qty>=5?Number(p.discount_5_percent||0):0;
+ const unit=Number(p.price_iqd),discount=Math.max(Number(p.discount_general_percent||0),qty>=20?Number(p.discount_20_percent||0):0,qty>=5?Number(p.discount_5_percent||0):0);
  if(!Number.isSafeInteger(unit)||unit<=0||!Number.isInteger(discount)||discount<0||discount>90)return null;
  const original=unit*qty,total=Math.floor((original*(100-discount)+50)/100);
  return {qty,unit,discount,original,total,saved:original-total};
@@ -22,9 +22,10 @@ export async function quantityPicker(db,env,uid,p){
    '\n💰 سعر الوحدة: '+price(p.price_iqd)+
    '\n📦 المخزون: '+(available.count??'غير محدود')+
    '\n📋 الحد الأقصى للطلب: '+Math.min(100,p.max_purchase_qty||100)+
+   '\n🏷️ خصم عام: '+(p.discount_general_percent||0)+'%'+
    '\n🎁 خصم 5 فأكثر: '+(p.discount_5_percent||0)+'%'+
    '\n🎁 خصم 20 فأكثر: '+(p.discount_20_percent||0)+'%'+
-   '\n\nالكمية يجب ألا تتجاوز المخزون أو الحد الأقصى.',
+   '\n\nيُطبّق أعلى خصم مستحق، دون جمع الخصومات. الكمية يجب ألا تتجاوز المخزون أو الحد الأقصى.',
    keyboard([button('1','buy_qty:'+p.id+':1','success'),button('5','buy_qty:'+p.id+':5','success'),button('20','buy_qty:'+p.id+':20','success')],
      [button('✏️ عدد مخصص','buy_custom:'+p.id,'primary')],
      [button('⬅️ رجوع للمنتج','product:'+p.id,'primary')],
