@@ -597,9 +597,9 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     if(!id||!['shared','unique','disabled'].includes(mode))return true;
     await db.prepare(`UPDATE products SET fulfillment_mode=?,
       stock=CASE WHEN ?='unique' THEN
-        (SELECT COUNT(*) FROM product_delivery_items i WHERE i.product_id=products.id AND i.used_by_purchase_id IS NULL
+        (SELECT COUNT(*) FROM product_delivery_items i WHERE i.product_id=products.id AND i.used_by_purchase_id IS NULL AND i.bulk_purchase_id IS NULL
            AND NOT EXISTS (SELECT 1 FROM product_delivery_items older
-             WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)))
+             WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL OR older.bulk_purchase_id IS NOT NULL)))
         ELSE stock END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(mode,mode,id).run();
     await audit(db,uid,'set_delivery_mode','product',id);
     await productDetail(db,env,uid,id,messageId);
@@ -773,17 +773,17 @@ export async function handleAdminText(db,env,uid,session,message){
       SELECT id,? FROM products WHERE id=? AND NOT EXISTS
       (SELECT 1 FROM product_delivery_items WHERE product_id=? AND payload=?)`).bind(code,id,id,code));
     const stockRefresh=db.prepare(`UPDATE products SET stock=(SELECT COUNT(*) FROM product_delivery_items i
-        WHERE i.product_id=? AND i.used_by_purchase_id IS NULL
+        WHERE i.product_id=? AND i.used_by_purchase_id IS NULL AND i.bulk_purchase_id IS NULL
           AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
-            WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL))),
+            WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL OR older.bulk_purchase_id IS NOT NULL))),
         updated_at=CURRENT_TIMESTAMP WHERE id=? AND fulfillment_mode='unique'`).bind(id,id);
     const result=await db.batch([...inserts,stockRefresh]);
     const added=result.slice(0,codes.length).reduce((n,v)=>n+Number(v.meta?.changes||0),0);
     if(added)await audit(db,uid,'add_unique_delivery_codes','product',id);
     await clearSession(db,uid);
     const available=await db.prepare(`SELECT COUNT(*) n FROM product_delivery_items i WHERE i.product_id=?
-      AND i.used_by_purchase_id IS NULL AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
-        WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL))`).bind(id).first();
+      AND i.used_by_purchase_id IS NULL AND i.bulk_purchase_id IS NULL AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
+        WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL OR older.bulk_purchase_id IS NOT NULL))`).bind(id).first();
     await sendText(env,uid,`✅ أضيف ${added} كود أو رابط فريد.\n🔁 عناصر مكررة لم تُضف: ${values.length-added}\n🔑 العناصر الباقية للبيع: ${available?.n||0}\n\nلتفعيلها اختر «🔑 تسليم كود فريد». وكل شراء جديد يستهلك كوداً واحداً دون إعادة استخدامه.`,keyboard([button('📦 إعداد المنتج',`admin_product:${id}`,'success')],adminBack));
     return true;
   }

@@ -7,7 +7,7 @@ import {flushOutbox,queueNotification} from '../src/telegram.js';
 
 function setup(){
   const conn=new DatabaseSync(':memory:');
-  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql','0011_product_visuals.sql','0012_product_warranty.sql','0017_payment_methods.sql'])
+  for(const file of ['0001_init.sql','0002_admin_controls.sql','0003_reliability.sql','0004_reference_catalog.sql','0005_persistent_navigation.sql','0006_wallet_checkout.sql','0007_support_moderation_topup.sql','0008_custom_ui_customer_inbox_cleanup.sql','0009_wallet_auto_delivery.sql','0010_purchase_views_and_unique_codes.sql','0011_product_visuals.sql','0012_product_warranty.sql','0017_payment_methods.sql','0023_wallet_bulk_discounts.sql'])
     conn.exec(readFileSync(new URL(`../migrations/${file}`,import.meta.url),'utf8'));
   const db={
     prepare(sql){
@@ -79,8 +79,8 @@ test('rapid duplicate wallet purchase confirmation only debits once and reserves
    await click('begin','buy:1',2999);
    const pending=conn.prepare('SELECT payload FROM user_sessions WHERE user_tg_id=101').get();
    const nonce=JSON.parse(pending.payload).nonce;
-   await click('cbA','wallet_confirm:'+nonce,3000);
-   await click('cbB','wallet_confirm:'+nonce,3001);
+   await click('cbA','bulk_confirm:'+nonce,3000);
+   await click('cbB','bulk_confirm:'+nonce,3001);
    await Promise.all(jobs);
    assert.equal(conn.prepare('SELECT COUNT(*) n FROM wallet_purchases').get().n,1);
    assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,15000);

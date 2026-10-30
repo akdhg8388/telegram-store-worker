@@ -7,7 +7,7 @@ import {handleAdminCallback,handleAdminText} from '../src/admin-controls.js';
 import {processUpdate} from '../src/bot.js';
 
 const root=new URL('../migrations/',import.meta.url);
-const migrations=['0001_init','0002_admin_controls','0003_reliability','0004_reference_catalog','0005_persistent_navigation','0006_wallet_checkout','0007_support_moderation_topup','0008_custom_ui_customer_inbox_cleanup','0009_wallet_auto_delivery','0010_purchase_views_and_unique_codes','0011_product_visuals','0012_product_warranty'];
+const migrations=['0001_init','0002_admin_controls','0003_reliability','0004_reference_catalog','0005_persistent_navigation','0006_wallet_checkout','0007_support_moderation_topup','0008_custom_ui_customer_inbox_cleanup','0009_wallet_auto_delivery','0010_purchase_views_and_unique_codes','0011_product_visuals','0012_product_warranty','0023_wallet_bulk_discounts'];
 function setup(){
  const c=new DatabaseSync(':memory:');
  for(const m of migrations)c.exec(readFileSync(new URL(`${m}.sql`,root),'utf8'));
@@ -118,7 +118,7 @@ test('callback buys from wallet without generating any Stars invoice or admin ap
    };
    await run(300,'buy:1');
    const nonce=JSON.parse(c.prepare('SELECT payload FROM user_sessions WHERE user_tg_id=101').get().payload).nonce;
-   await run(301,'wallet_confirm:'+nonce);
+   await run(301,'bulk_confirm:'+nonce);
    assert.equal(c.prepare('SELECT COUNT(*) n FROM wallet_purchases').get().n,1);
    assert.equal(c.prepare('SELECT COUNT(*) n FROM orders').get().n,0);
    assert.equal(c.prepare('SELECT COUNT(*) n FROM notification_outbox').get().n,0);

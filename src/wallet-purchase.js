@@ -72,23 +72,23 @@ export async function commitPurchase(db,env,uid,nonce){
     warranty_visible,warranty_available,warranty_terms_ar,warranty_terms_en)
     SELECT ?,p.id,p.price_iqd,?,
       CASE WHEN p.fulfillment_mode='unique' THEN
-        (SELECT i.id FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL
+        (SELECT i.id FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL AND i.bulk_purchase_id IS NULL
          AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
-           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)) ORDER BY i.id LIMIT 1)
+           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL OR older.bulk_purchase_id IS NOT NULL)) ORDER BY i.id LIMIT 1)
         ELSE NULL END,
       p.title,p.description,p.duration_months,
       CASE WHEN p.fulfillment_mode='unique' THEN
-        COALESCE((SELECT i.payload FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL
+        COALESCE((SELECT i.payload FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL AND i.bulk_purchase_id IS NULL
          AND NOT EXISTS(SELECT 1 FROM product_delivery_items older
-           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)) ORDER BY i.id LIMIT 1),'')
+           WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL OR older.bulk_purchase_id IS NOT NULL)) ORDER BY i.id LIMIT 1),'')
         ELSE p.delivery_shared_text END,
       p.usage_instructions,p.photo_file_id,
       p.warranty_visible,p.warranty_available,p.warranty_terms_ar,p.warranty_terms_en
     FROM products p WHERE p.id=? AND p.active=1 AND p.price_iqd>0
       AND (p.stock IS NULL OR p.stock>0)
       AND ( (p.fulfillment_mode='shared' AND length(trim(p.delivery_shared_text))>0)
-         OR (p.fulfillment_mode='unique' AND EXISTS(SELECT 1 FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL
-         AND NOT EXISTS(SELECT 1 FROM product_delivery_items older WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL)))))`;
+         OR (p.fulfillment_mode='unique' AND EXISTS(SELECT 1 FROM product_delivery_items i WHERE i.product_id=p.id AND i.used_by_purchase_id IS NULL AND i.bulk_purchase_id IS NULL
+         AND NOT EXISTS(SELECT 1 FROM product_delivery_items older WHERE older.product_id=i.product_id AND older.payload=i.payload AND (older.id<i.id OR older.used_by_purchase_id IS NOT NULL OR older.bulk_purchase_id IS NOT NULL)))))`;
   try {
     const result=await db.prepare(insert).bind(uid,nonce,p.id).run();
     if(!result.meta?.changes)return {failed:'لم يعد هذا المنتج متوفراً. لم يُخصم شيء.'};
