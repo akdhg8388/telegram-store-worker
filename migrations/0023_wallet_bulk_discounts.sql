@@ -14,7 +14,7 @@ BEGIN
  SELECT CASE WHEN NOT EXISTS(
   SELECT 1 FROM products p JOIN users u ON u.tg_id=NEW.user_tg_id
   WHERE p.id=NEW.product_id AND p.active=1 AND p.price_iqd>0
-   AND NEW.unit_price_iqd=p.price_iqd
+   AND COALESCE(NEW.unit_price_iqd,p.price_iqd)=p.price_iqd
    AND NEW.quantity BETWEEN 1 AND p.max_purchase_qty
    AND NEW.discount_percent=(CASE WHEN NEW.quantity>=20 THEN p.discount_20_percent
      WHEN NEW.quantity>=5 THEN p.discount_5_percent ELSE 0 END)
