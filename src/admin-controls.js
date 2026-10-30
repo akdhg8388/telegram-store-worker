@@ -34,7 +34,7 @@ export function adminRoute(data){
   if(/^admin_pay_(?:quote:\w+|quote_toggle:\w+|quote_currency:\w+:(?:IQD|USD)|quote_mode:\w+:(?:none|fixed|percent)|quote_edit:\w+)$/.test(data))return true;
   if(/^admin_home_button_color:[a-z_]+(?::(?:default|primary|success|danger))?$/.test(data)
     || /^admin_pay_(?:edit:\w+:icon|icon_delete:\w+)$/.test(data))return true;
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_discounts:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -139,6 +139,9 @@ const PRODUCT_FIELDS={
   delivery_shared_text:{label:'📦 محتوى التسليم الثابت',max:2000},
   price_stars:{label:'⭐ سعر قديم (للسجل فقط)',integer:true,min:1,max:10000000},
   stock:{label:'📦 المخزون',integer:true,min:0,max:1000000,nullable:true},
+  max_purchase_qty:{label:'📋 الحد الأقصى للطلب',integer:true,min:1,max:100},
+  discount_5_percent:{label:'🎁 خصم 5 قطع فأكثر (%)',integer:true,min:0,max:90},
+  discount_20_percent:{label:'🎁 خصم 20 قطعة فأكثر (%)',integer:true,min:0,max:90},
   duration_months:{label:'🗓️ المدة بالأشهر',integer:true,min:1,max:120,nullable:true},
   delivery_instructions:{label:'📦 تعليمات التسليم الخاصة',max:1800},
   warranty_terms_ar:{label:'🛡️ تفاصيل الضمان بالعربي (اختياري)',max:500},
@@ -165,6 +168,7 @@ async function productDetail(db,env,uid,id,messageId=null){
   for(const fields of [['title','description'],['price_iqd','stock'],['duration_months','usage_instructions'],['delivery_shared_text','delivery_instructions']])
     rows.push(fields.map(f=>button(PRODUCT_FIELDS[f].label,`admin_product_field:${id}:${f}`)));
   rows.push([button('✨ رمز متحرك خاص بهذا المنتج',`admin_product_icon:${id}`,'primary')]);
+  rows.push([button('🎁 خصومات الكميات',`admin_product_discounts:${id}`,'success')]);
   rows.push([button('🛡️ حالة الضمان: '+(p.warranty_visible?(p.warranty_available?'يوجد ضمان':'لا يوجد ضمان'):'مخفي'),`admin_product_warranty:${id}`,'primary')]);
   rows.push([button('📷 إضافة/تغيير صورة المنتج',`admin_product_photo:${id}`,'primary'),button('🗑️ حذف الصورة',`admin_product_photo_delete:${id}`,'danger')]);
   rows.push([button('📦 تسليم محتوى ثابت',`admin_product_mode:${id}:shared`,'success'),button('🔑 تسليم كود فريد',`admin_product_mode:${id}:unique`,'primary')]);
@@ -173,7 +177,7 @@ async function productDetail(db,env,uid,id,messageId=null){
   rows.push([button(p.active?'🚫 إخفاء المنتج':'✅ إظهار المنتج',`admin_product_toggle:${id}:active`,p.active?'danger':'success'),
              button(p.featured?'⭐ إلغاء التمييز':'🌟 تمييز المنتج',`admin_product_toggle:${id}:featured`)]);
   rows.push(backTo('admin_products:0'),adminBack);
-  const codes=await db.prepare('SELECT COUNT(*) n FROM product_delivery_items WHERE product_id=? AND used_by_purchase_id IS NULL').bind(id).first();
+  const codes=await db.prepare('SELECT COUNT(*) n FROM product_delivery_items WHERE product_id=? AND used_by_purchase_id IS NULL AND bulk_purchase_id IS NULL').bind(id).first();
   return reply(`📦 المنتج #${p.id}\n\n🏷️ ${short(p.title,120)}\n📂 ${short(p.category_title,80)}\n💰 سعر المحفظة: ${p.price_iqd?formatIQD(p.price_iqd):'لم يحدد'}\n📷 الصورة: ${p.photo_file_id?'✅ محفوظة':'—'}\n✨ رمز المنتج: ${p.custom_emoji_id?'✅ مخصص':'الرمز العام'}\n📖 طريقة الاستخدام: ${short(p.usage_instructions||'لم تضف',100)}\n📦 طريقة التسليم: ${p.fulfillment_mode}\n🔑 أكواد غير مستخدمة: ${codes?.n||0}\n📦 المحتوى الثابت: ${p.delivery_shared_text?'✅ محفوظ':'—'}\n📦 المخزون: ${p.stock??'غير محدود'}\n🗓️ المدة: ${p.duration_months??'غير محددة'}\n📢 النشر: ${p.active?'ظاهر':'مخفي'}\n🌟 مميز: ${p.featured?'نعم':'لا'}\n📝 الوصف: ${short(p.description,500)||'—'}\n🛡️ الضمان: ${p.warranty_visible?(p.warranty_available?'يوجد ضمان':'لا يوجد ضمان'):'مخفي'}\n📋 تفاصيل الضمان: ${short(p.warranty_terms_ar||'—',140)}\n📬 تعليمات التسليم: ${short(p.delivery_instructions,500)||'—'}`,keyboard(...rows));
 }
 async function warrantyMenu(db,env,uid,id,messageId=null){
@@ -558,6 +562,20 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data.startsWith('admin_setting:'))await settingDetail(db,env,uid,data.substring('admin_setting:'.length),messageId);
   else if(data.startsWith('admin_products'))await products(db,env,uid,Math.min(100,positiveInt(data.split(':')[1])??0),messageId);
   else if(data.startsWith('admin_product:'))await productDetail(db,env,uid,Number(data.split(':')[1]),messageId);
+  else if(data.startsWith('admin_product_discounts:')){
+    const id=positiveInt(data.split(':')[1]);if(!id)return true;
+    const p=await db.prepare('SELECT id,title,max_purchase_qty,discount_5_percent,discount_20_percent FROM products WHERE id=?').bind(id).first();
+    if(!p)return true;
+    await sendOrEditText(env,uid,'🎁 خصومات الكميات للمنتج #'+id+'\n\n📦 '+short(p.title,100)+
+      '\n📋 الحد الأقصى: '+p.max_purchase_qty+
+      '\n💚 خصم 5 فأكثر: '+p.discount_5_percent+'%'+
+      '\n💚 خصم 20 فأكثر: '+p.discount_20_percent+'%'+
+      '\n\nكل نسبة مستقلة، و0% يعني بدون خصم. الإعدادات تخص هذا المنتج فقط.',keyboard(
+      [button('📋 تعديل الحد الأقصى',`admin_product_field:${id}:max_purchase_qty`,'primary')],
+      [button('🎁 تعديل خصم 5',`admin_product_field:${id}:discount_5_percent`,'success')],
+      [button('🎁 تعديل خصم 20',`admin_product_field:${id}:discount_20_percent`,'success')],
+      [button('⬅️ المنتج',`admin_product:${id}`)],adminBack),messageId);
+  }
   else if(data.startsWith('admin_product_icon:')){
     const id=positiveInt(data.split(':')[1]);if(!id)return true;
     await setSession(db,uid,'owner_product_icon',{id});
