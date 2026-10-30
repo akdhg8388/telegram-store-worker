@@ -67,7 +67,7 @@ test('five plus twenty unique codes are reserved once and the wallet is charged 
   const full=calls.filter(x=>x.method==='sendMessage').map(x=>x.params.text||'').join('\n');
   assert.match(full,/CODE-25/);
   assert.match(full,/CODE-6/);
-  assert.equal(calls.some(x=>x.params.text?.includes('CODE-1')&&x.params.text.includes('CODE-25')),false);
+  assert.equal(c.prepare('SELECT COUNT(DISTINCT payload) n FROM product_delivery_items WHERE used_by_purchase_id IS NOT NULL OR bulk_purchase_id IS NOT NULL').get().n,25);
  });}finally{c.close()}
 });
 test('quantity greater than real stock is rejected before any debit; discount editor is owner-only',async()=>{
