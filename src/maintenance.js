@@ -4,6 +4,7 @@ import {sendText,sendOrEditText,telegram} from './telegram.js';
 import {updateSetting} from './settings.js';
 import {setSession,clearSession,audit} from './database.js';
 import {choice,languageOf} from './i18n.js';
+import {queueBroadcast,broadcastBody} from './broadcasts.js';
 
 // The owner is exempt. Only top-level user navigation is intercepted;
 // active wallet purchases, stock reservations and payment workflows are safe.
@@ -70,13 +71,17 @@ export async function maintenanceMenu(db,env,uid,messageId=null){
 export async function maintenanceDetail(db,env,uid,id,messageId=null){
  if(!isAdmin(env,uid)||!valid(id))return false;
  const s=await details(db,id),active=s[key(id,'enabled')]==='true',global=id==='global';
+ const resume=global?(await db.prepare("SELECT value FROM bot_settings WHERE key='maintenance_resume_message_ar'").first())?.value||'':'';
  const lines=['🛠️ '+label(id),'', 'الحالة: '+(active?'🔴 مفعلة':'🟢 متوقفة'),
  'الملصق المتحرك: '+(s[key(id,'sticker')]?'✅ محفوظ':'غير مضاف'),
  '', '🇮🇶 الرسالة العربية:',s[key(id,'ar')]||(global?globalAr:defaultAr),
  '', '🇬🇧 English:',s[key(id,'en')]||(global?globalEn:defaultEn),
- '', 'تظهر رسالة الصيانة بخط عريض كامل عند المستخدم.'];
+ '', 'تظهر رسالة الصيانة بخط عريض كامل عند المستخدم.',
+ ...(global?['','📢 رسالة إعلان انتهاء الصيانة:',resume||'غير محددة — لن يُنشر إعلان تلقائي عند الإنهاء.']:[])];
  return sendOrEditText(env,uid,lines.join('\n'),keyboard(
  [button(active?'✅ إنهاء الصيانة':'🛠️ تشغيل الصيانة','maintenance_toggle:'+id,active?'success':'danger')],
+ ...(global?[[button('📢 نشر إعلان عام','broadcast_menu','success')],
+ [button('✏️ رسالة انتهاء الصيانة','maintenance_resume_edit','primary')]]:[]),
  [button('📝 تعديل النص العربي','maintenance_edit:'+id+':ar','primary')],
  [button('🎞️ إضافة ملصق متحرك','maintenance_sticker:'+id,'primary')],
  [button('🗑️ إزالة الملصق','maintenance_remove_sticker:'+id,'danger')],
@@ -85,12 +90,17 @@ export async function maintenanceDetail(db,env,uid,id,messageId=null){
  [button('↩️ قائمة الصيانة','admin_maintenance','primary')],ownerButton),messageId,{preserveText:true});
 }
 export async function maintenanceAdminCallback(db,env,uid,data,messageId=null){
- if(data!=='admin_maintenance'&&data!=='admin_maintenance_toggle'&&
+ if(data!=='admin_maintenance'&&data!=='admin_maintenance_toggle'&&data!=='maintenance_resume_edit'&&
  !/^maintenance_(?:view|toggle|sticker|remove_sticker|reset|preview):[a-z_]+$/.test(data)&&
  !/^maintenance_edit:[a-z_]+:(?:ar|en)$/.test(data))return false;
  if(!isAdmin(env,uid))return true;
  if(data==='admin_maintenance'){await maintenanceMenu(db,env,uid,messageId);return true;}
  if(data==='admin_maintenance_toggle')data='maintenance_toggle:global';
+ if(data==='maintenance_resume_edit'){
+  await setSession(db,uid,'owner_maintenance_resume_text');
+  await sendText(env,uid,'✏️ اكتب رسالة انتهاء الصيانة العامة (حتى 3500 حرف).\nتقبل الإيموجي وستصل بخط عريض لكل المستخدمين عند إنهاء الصيانة.\n/empty لمسح النص، أو /cancel للإلغاء.');
+  return true;
+ }
  const [action,id,lang]=data.split(':');
  if(!valid(id))return true;
  if(action==='maintenance_view')await maintenanceDetail(db,env,uid,id,messageId);
@@ -99,6 +109,14 @@ export async function maintenanceAdminCallback(db,env,uid,data,messageId=null){
   if(id==='global')await updateSetting(db,name,v?.value==='true'?'false':'true',uid);
   else await save(db,uid,name,v?.value==='true'?'false':'true');
   await audit(db,uid,'toggle_maintenance_'+id,'setting',0);
+  if(id==='global'&&v?.value==='true'){
+   const text=(await db.prepare("SELECT value FROM bot_settings WHERE key='maintenance_resume_message_ar'").first())?.value;
+   if(broadcastBody(text)){
+    const job=await queueBroadcast(db,uid,text,'resume');
+    await audit(db,uid,'maintenance_resume_broadcast','setting',job);
+    await sendText(env,uid,'📢 تم إدراج رسالة انتهاء الصيانة #'+job+' للنشر التدريجي على المستخدمين.');
+   }
+  }
   await maintenanceDetail(db,env,uid,id,messageId);
  }else if(action==='maintenance_edit'){
   await setSession(db,uid,'owner_maintenance_text',{scope:id,lang});
@@ -118,7 +136,19 @@ export async function maintenanceAdminCallback(db,env,uid,data,messageId=null){
  return true;
 }
 export async function maintenanceAdminText(db,env,uid,session,message){
- if(!isAdmin(env,uid)||!['owner_maintenance_text','owner_maintenance_sticker'].includes(session?.action))return false;
+ if(!isAdmin(env,uid)||!['owner_maintenance_text','owner_maintenance_sticker','owner_maintenance_resume_text'].includes(session?.action))return false;
+ if(session.action==='owner_maintenance_resume_text'){
+  const body=String(message.text||'').trim();
+  if(body!=='/empty'&&!broadcastBody(body)){
+   await sendText(env,uid,'❌ أدخل رسالة حتى 3500 حرف أو /empty لمسح الإعلان.');return true;
+  }
+  await save(db,uid,'maintenance_resume_message_ar',body==='/empty'?'':body);
+  await audit(db,uid,'maintenance_resume_message_edit','setting',0);
+  await clearSession(db,uid);
+  await sendText(env,uid,'✅ تم حفظ رسالة انتهاء الصيانة. تُرسل فقط عند إنهاء الصيانة العامة.',keyboard(
+   [button('🛠️ إعداد الصيانة العامة','maintenance_view:global','primary')],ownerButton));
+  return true;
+ }
  const id=session.payload?.scope;if(!valid(id)){await clearSession(db,uid);return true;}
  if(session.action==='owner_maintenance_text'){
   const lang=session.payload?.lang,t=String(message.text||'').trim();

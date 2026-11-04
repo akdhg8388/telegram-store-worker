@@ -22,6 +22,7 @@ import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20Txid
 import {issueTrc20Claim,parseSplitUsdCents,trc20ClaimMessage,activeTrc20Claim} from './trc20-claims.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
+import {broadcastAdminCallback,broadcastAdminText} from './broadcasts.js';
 
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}) {
   for(const admin of adminIds(env)) {
@@ -301,6 +302,7 @@ async function handleMessage(db,env,ctx,message){
   const session=await getSession(db,uid);
   if(session){
     if(session.action.startsWith('owner_') && await maintenanceAdminText(db,env,uid,session,message))return;
+    if(session.action.startsWith('owner_') && await broadcastAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await referralAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleChannelAdminText(db,env,uid,session,message))return;
     if(session.action.startsWith('owner_') && await handleUserText(db,env,uid,session,message))return;
@@ -541,6 +543,7 @@ async function handleCallback(db,env,ctx,q){
   }
   if(maint.button)return sendMaintenanceNotice(db,env,uid,maintenanceActionId(data));
   if(await maintenanceAdminCallback(db,env,uid,data,q.message?.message_id))return;
+  if(await broadcastAdminCallback(db,env,uid,data,q.message?.message_id))return;
   if(await referralAdminCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleChannelAdmin(db,env,uid,data,q.message?.message_id))return;
   if(await handleCustomerSupportCallback(db,env,uid,data,q.message?.message_id))return;
