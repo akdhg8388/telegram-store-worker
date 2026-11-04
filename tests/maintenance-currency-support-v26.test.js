@@ -6,7 +6,6 @@ import {ensureUser,getUser,setSession,getSession} from '../src/database.js';
 import {currencyMenu} from '../src/ui.js';
 import {thread,handleSupportCallback} from '../src/support.js';
 import {maintenanceAdminCallback,maintenanceAdminText} from '../src/maintenance.js';
-import {broadcastBody,queueBroadcast,stageBroadcasts,broadcastAdminText,broadcastAdminCallback} from '../src/broadcasts.js';
 import {processUpdate} from '../src/bot.js';
 
 function setup(){
@@ -85,74 +84,15 @@ test('Home cleans both products list and photo detail, never touching incoming m
    assert.ok(!deletes.includes(999),'customer messages must not be removed');
  });}finally{c.close()}
 });
-test('broadcast needs explicit confirmation, sends bold emoji in bounded idempotent background batches',async()=>{
- const {c,db}=setup();try{await mock(async calls=>{
-   c.prepare("INSERT INTO users(tg_id,first_name) VALUES(101,'A'),(102,'B'),(991,'Owner')").run();
-   for(let id=200;id<240;id++)c.prepare('INSERT INTO users(tg_id,first_name) VALUES(?,?)').run(id,'Client');
-   await broadcastAdminCallback(db,env,991,'broadcast_compose');
-   await broadcastAdminText(db,env,991,{action:'owner_broadcast_compose'},{text:'📢 **رسالة** 💙'});
-   assert.equal(c.prepare('SELECT COUNT(*) n FROM maintenance_broadcast_jobs').get().n,0);
-   await broadcastAdminCallback(db,env,991,'broadcast_confirm',700);
-   const one=c.prepare('SELECT * FROM maintenance_broadcast_jobs').get();
-   assert.ok(one&&one.kind==='manual');
-   assert.equal(c.prepare('SELECT COUNT(*) n FROM notification_outbox WHERE broadcast_job_id=?').get(one.id).n,20);
-   assert.equal(await stageBroadcasts(db),20);
-   assert.equal(c.prepare('SELECT COUNT(*) n FROM notification_outbox WHERE broadcast_job_id=?').get(one.id).n,40);
-   await stageBroadcasts(db);
-   await stageBroadcasts(db);
-   const rows=c.prepare('SELECT payload FROM notification_outbox WHERE broadcast_job_id=?').all(one.id);
-   assert.equal(rows.length,43);
-   assert.equal(new Set(rows.map(r=>JSON.parse(r.payload).chat_id)).size,43);
-   assert.ok(rows.every(r=>{
-     const p=JSON.parse(r.payload);
-     return p.text==='📢 **رسالة** 💙' && p.entities[0].type==='bold' &&
-       p.entities[0].length===p.text.length && p._preserve_text===true;
-   }));
-   assert.equal(c.prepare('SELECT status FROM maintenance_broadcast_jobs WHERE id=?').get(one.id).status,'completed');
- });}finally{c.close()}
-});
-test('global maintenance stays enabled while composing; disabling queues the saved reopening text',async()=>{
- const {c,db}=setup();try{await mock(async()=>{
+test('maintenance toggles normally without queuing announcements',async()=>{
+ const {c,db}=setup();
+ try{await mock(async()=>{
    c.prepare("INSERT INTO users(tg_id,first_name) VALUES(991,'Owner'),(101,'Buyer')").run();
    await maintenanceAdminCallback(db,env,991,'maintenance_toggle:global',90);
    assert.equal(c.prepare("SELECT value FROM bot_settings WHERE key='maintenance_enabled'").get().value,'true');
-   await maintenanceAdminCallback(db,env,991,'maintenance_resume_edit');
-   const session=await getSession(db,991);
-   assert.equal(session.action,'owner_maintenance_resume_text');
-   await maintenanceAdminText(db,env,991,session,{text:'✅ عدنا للعمل! 💚'});
-   assert.equal(c.prepare('SELECT COUNT(*) n FROM maintenance_broadcast_jobs').get().n,0);
    await maintenanceAdminCallback(db,env,991,'maintenance_toggle:global',90);
    assert.equal(c.prepare("SELECT value FROM bot_settings WHERE key='maintenance_enabled'").get().value,'false');
-   const job=c.prepare('SELECT kind,body FROM maintenance_broadcast_jobs').get();
-   assert.equal(job.kind,'resume');
-   assert.equal(job.body,'✅ عدنا للعمل! 💚');
-   await stageBroadcasts(db);
-   assert.ok(c.prepare('SELECT COUNT(*) n FROM notification_outbox WHERE broadcast_job_id IS NOT NULL').get().n>=2);
- });}finally{c.close()}
-});
-
-test('Confirming a broadcast starts delivery without cron; resume sends remaining queued only once',async()=>{
- const {c,db}=setup();
- try{await mock(async calls=>{
-   c.prepare("INSERT INTO users(tg_id,first_name) VALUES(991,'Owner'),(101,'Buyer'),(102,'Other')").run();
-   await broadcastAdminCallback(db,env,991,'broadcast_compose');
-   await broadcastAdminText(db,env,991,{action:'owner_broadcast_compose'},{text:'📣 تحديثات My Store 💚'});
-   const pending=[];
-   const ctx={waitUntil(p){pending.push(p)}};
-   await broadcastAdminCallback(db,env,991,'broadcast_confirm',700,ctx);
-   await Promise.all(pending);
-   const job=c.prepare('SELECT id,queued_count FROM maintenance_broadcast_jobs').get();
-   assert.equal(job.queued_count,3);
-   const sent=c.prepare("SELECT COUNT(*) n FROM notification_outbox WHERE broadcast_job_id=? AND state='sent'").get(job.id).n;
-   assert.equal(sent,3);
-   const before=calls.filter(x=>x.method==='sendMessage'&&x.payload.text==='📣 تحديثات My Store 💚').length;
-   assert.equal(before,3);
-   await broadcastAdminCallback(db,env,991,'broadcast_resume:'+job.id,701,ctx);
-   await Promise.all(pending);
-   const after=calls.filter(x=>x.method==='sendMessage'&&x.payload.text==='📣 تحديثات My Store 💚').length;
-   assert.equal(after,before);
-   await broadcastAdminCallback(db,env,991,'broadcast_menu',702);
-   assert.ok(calls.at(-1).payload.text.includes('تم الإرسال فعلياً: 3'));
-   assert.ok(calls.at(-1).payload.text.includes('بانتظار الإرسال: 0'));
+   assert.equal(c.prepare('SELECT COUNT(*) n FROM maintenance_broadcast_jobs').get().n,0);
+   await maintenanceAdminCallback(db,env,991,'maintenance_view:global',90);
  });}finally{c.close()}
 });

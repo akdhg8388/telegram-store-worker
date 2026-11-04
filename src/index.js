@@ -1,7 +1,6 @@
 import {processUpdate} from './bot.js';
 import {flushOutbox} from './telegram.js';
 import {pollTrc20Payments} from './trc20-cron.js';
-import {stageBroadcasts} from './broadcasts.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -30,8 +29,6 @@ export default {
     ctx.waitUntil((async()=>{
       try{await pollTrc20Payments(env.DB,env)}
       catch(error){console.error('TRC20 scheduled verification failed',String(error))}
-      try{await stageBroadcasts(env.DB)}
-      catch(error){console.error('Broadcast staging failed',String(error))}
       await flushOutbox(env.DB,env,25);
     })());
   }
