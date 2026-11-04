@@ -25,7 +25,7 @@ async function mock(callback){
  globalThis.fetch=async(url,options)=>{
    const method=String(url).split('/').at(-1),payload=JSON.parse(options.body);
    calls.push({method,payload});
-   return new Response(JSON.stringify({ok:true,result:{message_id:++msg}}),{status:200});
+   return new Response(JSON.stringify({ok:true,result:{message_id:method.startsWith('editMessage')?payload.message_id:++msg}}),{status:200});
  };
  try{return await callback(calls)}finally{globalThis.fetch=old}
 }
