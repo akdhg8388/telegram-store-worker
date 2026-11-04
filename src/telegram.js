@@ -79,8 +79,7 @@ export async function queueNotification(db, method, params, metadata={}) {
 export async function flushOutbox(db, env, limit = 10) {
   const now = Math.floor(Date.now()/1000);
   const rows = await db.prepare(`SELECT id,method,payload,attempts,support_message_id,topup_request_id FROM notification_outbox
-    WHERE ((state='pending' AND next_attempt_at <= ?) OR (state='sending' AND lease_until < ?))
-      AND broadcast_job_id IS NULL ORDER BY id LIMIT ?`)
+    WHERE (state='pending' AND next_attempt_at <= ?) OR (state='sending' AND lease_until < ?) ORDER BY id LIMIT ?`)
     .bind(now,now,limit).all();
   for(const item of rows.results ?? []) {
     const claim = await db.prepare(`UPDATE notification_outbox SET state='sending',lease_until=?,attempts=attempts+1
