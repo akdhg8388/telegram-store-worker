@@ -76,11 +76,16 @@ export async function queueNotification(db, method, params, metadata={}) {
   await db.prepare('INSERT INTO notification_outbox(method,payload,support_message_id,topup_request_id) VALUES (?,?,?,?)')
     .bind(method,JSON.stringify(params),metadata.supportMessageId||null,metadata.topupRequestId||null).run();
 }
-export async function flushOutbox(db, env, limit = 10) {
+export async function flushOutbox(db, env, limit = 10, broadcastJobId = null) {
   const now = Math.floor(Date.now()/1000);
-  const rows = await db.prepare(`SELECT id,method,payload,attempts,support_message_id,topup_request_id FROM notification_outbox
-    WHERE (state='pending' AND next_attempt_at <= ?) OR (state='sending' AND lease_until < ?) ORDER BY id LIMIT ?`)
-    .bind(now, now, limit).all();
+  // When the owner explicitly publishes, prioritize ONLY that announcement's
+  // first few recipients. Normal webhooks and the cron retain their old queue.
+  const scoped=Number.isSafeInteger(broadcastJobId)&&broadcastJobId>0;
+  const query=`SELECT id,method,payload,attempts,support_message_id,topup_request_id FROM notification_outbox
+    WHERE ((state='pending' AND next_attempt_at <= ?) OR (state='sending' AND lease_until < ?))
+    ${scoped?'AND broadcast_job_id=?':''} ORDER BY id LIMIT ?`;
+  const rows = await db.prepare(query)
+    .bind(...(scoped?[now,now,broadcastJobId,limit]:[now,now,limit])).all();
   for(const item of rows.results ?? []) {
     const claim = await db.prepare(`UPDATE notification_outbox SET state='sending',lease_until=?,attempts=attempts+1
       WHERE id=? AND ((state='pending' AND next_attempt_at <= ?) OR (state='sending' AND lease_until < ?))`)

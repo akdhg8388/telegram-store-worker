@@ -130,3 +130,29 @@ test('global maintenance stays enabled while composing; disabling queues the sav
    assert.ok(c.prepare('SELECT COUNT(*) n FROM notification_outbox WHERE broadcast_job_id IS NOT NULL').get().n>=2);
  });}finally{c.close()}
 });
+
+test('Confirming a broadcast starts delivery without cron; resume sends remaining queued only once',async()=>{
+ const {c,db}=setup();
+ try{await mock(async calls=>{
+   c.prepare("INSERT INTO users(tg_id,first_name) VALUES(991,'Owner'),(101,'Buyer'),(102,'Other')").run();
+   await broadcastAdminCallback(db,env,991,'broadcast_compose');
+   await broadcastAdminText(db,env,991,{action:'owner_broadcast_compose'},{text:'📣 تحديثات My Store 💚'});
+   const pending=[];
+   const ctx={waitUntil(p){pending.push(p)}};
+   await broadcastAdminCallback(db,env,991,'broadcast_confirm',700,ctx);
+   await Promise.all(pending);
+   const job=c.prepare('SELECT id,queued_count FROM maintenance_broadcast_jobs').get();
+   assert.equal(job.queued_count,3);
+   const sent=c.prepare("SELECT COUNT(*) n FROM notification_outbox WHERE broadcast_job_id=? AND state='sent'").get(job.id).n;
+   assert.equal(sent,3);
+   const before=calls.filter(x=>x.method==='sendMessage'&&x.payload.text==='📣 تحديثات My Store 💚').length;
+   assert.equal(before,3);
+   await broadcastAdminCallback(db,env,991,'broadcast_resume:'+job.id,701,ctx);
+   await Promise.all(pending);
+   const after=calls.filter(x=>x.method==='sendMessage'&&x.payload.text==='📣 تحديثات My Store 💚').length;
+   assert.equal(after,before);
+   await broadcastAdminCallback(db,env,991,'broadcast_menu',702);
+   assert.ok(calls.at(-1).payload.text.includes('تم الإرسال فعلياً: 3'));
+   assert.ok(calls.at(-1).payload.text.includes('بانتظار الإرسال: 0'));
+ });}finally{c.close()}
+});

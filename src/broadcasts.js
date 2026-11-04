@@ -1,5 +1,5 @@
 import {button,keyboard,isAdmin} from './common.js';
-import {telegram,sendText,sendOrEditText} from './telegram.js';
+import {sendText,sendOrEditText,flushOutbox} from './telegram.js';
 import {setSession,clearSession,audit} from './database.js';
 
 const MAX_LENGTH=3500;
@@ -13,14 +13,37 @@ export function broadcastBody(text){
 export function broadcastOptions(text){
  return {entities:[{type:'bold',offset:0,length:String(text).length}],preserveText:true};
 }
+export async function broadcastStats(db,jobId=null){
+ const sql="SELECT j.id,j.kind,j.status,j.queued_count,j.cursor_user_id, "+
+   "(SELECT COUNT(*) FROM notification_outbox o WHERE o.broadcast_job_id=j.id AND o.state='sent') AS sent_count, "+
+   "(SELECT COUNT(*) FROM notification_outbox o WHERE o.broadcast_job_id=j.id AND o.state!='sent') AS waiting_count, "+
+   "(SELECT COALESCE(SUM(CASE WHEN o.attempts>0 AND o.state!='sent' THEN 1 ELSE 0 END),0) FROM notification_outbox o WHERE o.broadcast_job_id=j.id) AS retry_count "+
+   "FROM maintenance_broadcast_jobs j ";
+ return jobId?db.prepare(sql+"WHERE j.id=?").bind(jobId).first():
+   db.prepare(sql+"ORDER BY j.id DESC LIMIT 1").first();
+}
 export async function broadcastMenu(db,env,uid,messageId=null){
  if(!isAdmin(env,uid))return false;
- const record=await db.prepare("SELECT id,status,queued_count,kind FROM maintenance_broadcast_jobs ORDER BY id DESC LIMIT 1").first();
- const status=record?'\n\n📊 آخر إرسال #'+record.id+': '+(record.status==='pending'?'⏳ جارٍ تجهيز الإرسال':'✅ اكتمل تجهيز الإرسال')+
-   '\n📤 تم إدراج: '+record.queued_count+' مستلم':'';
- return sendOrEditText(env,uid,'📢 النشر العام\n\nاكتب رسالة خاصة بمتجرك مع الإيموجي؛ ستظهر للزبائن بخط عريض. \n'+
-  '⚡ تُجهّز الرسائل على دفعات صغيرة في الخلفية من خلال الفحص المجدول، ولا يتم إرسالها قبل التأكيد.'+status,
-  keyboard([button('📝 كتابة إعلان عام','broadcast_compose','success')],adminBack),messageId);
+ const [record,total]=await Promise.all([
+   broadcastStats(db),db.prepare("SELECT COUNT(*) AS n FROM users").first()
+ ]);
+ const ready=Number(record?.queued_count||0);
+ const status=record?
+   '\n\n📊 الإعلان #'+record.id+' • '+(record.status==='pending'?'⏳ جارٍ تجهيز المستلمين':'✅ اكتمل إدراج المستلمين')+
+   '\n👥 المستخدمون المسجلون: '+Number(total?.n||0)+
+   '\n📥 أُدرج بالطابور: '+ready+
+   '\n✅ تم الإرسال فعلياً: '+Number(record.sent_count||0)+
+   '\n⏳ بانتظار الإرسال: '+Number(record.waiting_count||0)+
+   '\n🔄 جاري إعادة المحاولة: '+Number(record.retry_count||0)+
+   (record.status==='completed'&&Number(record.waiting_count||0)>0?'\n⚠️ انتهى إدراج المستلمين، لكن إيصال الرسائل لم يكتمل بعد.':''):
+   '\n\nلا توجد إعلانات مُعتمدة حتى الآن.';
+ return sendOrEditText(env,uid,'📢 النشر العام\n\nتستطيع إرسال إعلان بدون تفعيل وضع الصيانة.'+
+   '\n✍️ النص والإيموجي يظهران بخط عريض.\n⚡ يبدأ إرسال أول دفعة عند التأكيد وتُستكمل الدفعات تدريجياً.'+status,
+  keyboard(
+    [button('📝 كتابة إعلان عام','broadcast_compose','success')],
+    ...(record?[[button('🔄 تحديث حالة التوصيل','broadcast_menu','primary')],
+      [button('🚀 استكمال الإعلان #'+record.id,'broadcast_resume:'+record.id,'success')]]:[]),
+    adminBack),messageId);
 }
 export async function queueBroadcast(db,uid,body,kind='manual'){
  const value=broadcastBody(body);
@@ -29,10 +52,23 @@ export async function queueBroadcast(db,uid,body,kind='manual'){
    .bind(kind,value,uid).run();
  return result.meta.last_row_id;
 }
-export async function broadcastAdminCallback(db,env,uid,data,messageId=null){
- if(!['broadcast_menu','broadcast_compose','broadcast_confirm','broadcast_cancel'].includes(data))return false;
+export async function broadcastAdminCallback(db,env,uid,data,messageId=null,ctx=null){
+ if(!['broadcast_menu','broadcast_compose','broadcast_confirm','broadcast_cancel'].includes(data)&&
+    !/^broadcast_resume:\d+$/.test(data))return false;
  if(!isAdmin(env,uid))return true;
  if(data==='broadcast_menu'){await broadcastMenu(db,env,uid,messageId);return true;}
+ if(data.startsWith('broadcast_resume:')){
+   const jobId=Number(data.slice('broadcast_resume:'.length));
+   if(!Number.isSafeInteger(jobId)||jobId<=0)return true;
+   const existing=await broadcastStats(db,jobId);
+   if(!existing)return sendText(env,uid,'لا يوجد إعلان بهذا الرقم.');
+   if(existing.status==='pending')await stageBroadcasts(db,jobId);
+   // Fast bounded sends in the request's background; never block navigation.
+   const dispatch=flushOutbox(db,env,8,jobId).catch(e=>console.error('Broadcast dispatch failed',jobId,String(e)));
+   if(ctx?.waitUntil)ctx.waitUntil(dispatch);else await dispatch;
+   await broadcastMenu(db,env,uid,messageId);
+   return true;
+ }
  if(data==='broadcast_compose'){
    await setSession(db,uid,'owner_broadcast_compose');
    await sendText(env,uid,'📢 أرسل نص الإعلان العام (حتى 3500 حرف). يقبل الإيموجي ويظهر كله بخط عريض.\nلن يصل إلى الزبائن إلا بعد مراجعتك وتأكيدك. للإلغاء /cancel.');
@@ -49,7 +85,14 @@ export async function broadcastAdminCallback(db,env,uid,data,messageId=null){
  const jobId=await queueBroadcast(db,uid,body);
  await clearSession(db,uid);
  await audit(db,uid,'start_broadcast','setting',jobId);
- return sendOrEditText(env,uid,'✅ تم اعتماد الإعلان #'+jobId+'\n\n⏳ سيتم تجهيزه تدريجياً ضمن طابور الرسائل المجدول، حتى لا تتباطأ استجابة البوت.',keyboard(adminBack),messageId);
+ // Start the first recipients on THIS click. Scheduled runs are a fallback,
+ // not the only path to delivery. Every recipient is uniquely keyed in D1.
+ await stageBroadcasts(db,jobId);
+ const dispatch=flushOutbox(db,env,8,jobId).catch(e=>console.error('Broadcast first dispatch failed',jobId,String(e)));
+ if(ctx?.waitUntil)ctx.waitUntil(dispatch);else await dispatch;
+ return sendOrEditText(env,uid,'✅ تم اعتماد الإعلان #'+jobId+
+   '\n🚀 بدأ تجهيز المستلمين وإرسال الدفعة الأولى.\n\nافتح متابعة الإعلان لمعرفة عدد الرسائل التي وصل إرسالها فعلياً.',keyboard(
+   [button('📊 متابعة الإعلان','broadcast_menu','success')],adminBack),messageId);
 }
 export async function broadcastAdminText(db,env,uid,session,message){
  if(!isAdmin(env,uid)||session?.action!=='owner_broadcast_compose')return false;
@@ -66,8 +109,10 @@ export async function broadcastAdminText(db,env,uid,session,message){
    entities:[{type:'bold',offset:'👁️ معاينة الإعلان:\n\n'.length,length:body.length}],preserveText:true
  });
 }
-export async function stageBroadcasts(db){
- const job=await db.prepare("SELECT id,body,cursor_user_id FROM maintenance_broadcast_jobs WHERE status='pending' ORDER BY id LIMIT 1").first();
+export async function stageBroadcasts(db,jobId=null){
+ const job=jobId?
+   await db.prepare("SELECT id,body,cursor_user_id FROM maintenance_broadcast_jobs WHERE id=? AND status='pending'").bind(jobId).first():
+   await db.prepare("SELECT id,body,cursor_user_id FROM maintenance_broadcast_jobs WHERE status='pending' ORDER BY id LIMIT 1").first();
  if(!job)return 0;
  // Never enqueue thousands of messages in a webhook; process only a bounded
  // number per scheduled run. Unique(job,user) protects retries/restarts.
@@ -81,7 +126,7 @@ export async function stageBroadcasts(db){
    "INSERT OR IGNORE INTO notification_outbox(method,payload,broadcast_job_id,broadcast_user_id) VALUES('sendMessage',?,?,?)")
    .bind(JSON.stringify({chat_id:u.tg_id,text:job.body,entities:bold.entities,_preserve_text:true}),job.id,u.tg_id));
  const newCursor=users[users.length-1].tg_id;
- insert.push(db.prepare("UPDATE maintenance_broadcast_jobs SET cursor_user_id=?,queued_count=(SELECT COUNT(*) FROM notification_outbox WHERE broadcast_job_id=?) WHERE id=? AND status='pending'")
+ insert.push(db.prepare("UPDATE maintenance_broadcast_jobs SET cursor_user_id=MAX(cursor_user_id,?),queued_count=(SELECT COUNT(*) FROM notification_outbox WHERE broadcast_job_id=?) WHERE id=? AND status='pending'")
    .bind(newCursor,job.id,job.id));
  await db.batch(insert);
  return users.length;

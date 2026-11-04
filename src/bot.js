@@ -543,7 +543,7 @@ async function handleCallback(db,env,ctx,q){
   }
   if(maint.button)return sendMaintenanceNotice(db,env,uid,maintenanceActionId(data));
   if(await maintenanceAdminCallback(db,env,uid,data,q.message?.message_id))return;
-  if(await broadcastAdminCallback(db,env,uid,data,q.message?.message_id))return;
+  if(await broadcastAdminCallback(db,env,uid,data,q.message?.message_id,ctx))return;
   if(await referralAdminCallback(db,env,uid,data,q.message?.message_id))return;
   if(await handleChannelAdmin(db,env,uid,data,q.message?.message_id))return;
   if(await handleCustomerSupportCallback(db,env,uid,data,q.message?.message_id))return;
