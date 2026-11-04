@@ -8,7 +8,7 @@ export function userProfileChanged(stored,incoming){
 }
 export async function ensureUser(db, u) {
   if(!u?.id) return;
-  await db.prepare(`INSERT INTO users (tg_id,first_name,username) VALUES (?,?,?)
+  await db.prepare(`INSERT INTO users (tg_id,first_name,username,currency_preference) VALUES (?,?,?,'USD')
     ON CONFLICT(tg_id) DO UPDATE SET first_name=excluded.first_name, username=excluded.username, updated_at=CURRENT_TIMESTAMP`)
     .bind(u.id, String(u.first_name ?? '').slice(0,150), u.username ? String(u.username).slice(0,120) : null).run();
 }

@@ -654,7 +654,9 @@ async function handleCallback(db,env,ctx,q){
     const currency=data.split(':')[1];
     if(!['IQD','USD'].includes(currency))return;
     await clearSession(db,uid);
-    await db.prepare('UPDATE users SET currency_preference=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(currency,uid).run();
+    const existing=await getUser(db,uid);
+    if(existing?.currency_preference!==currency)
+      await db.prepare('UPDATE users SET currency_preference=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(currency,uid).run();
     return ui.currencyMenu(db,env,uid,q.message?.message_id);
   }
   if(data==='topup'){

@@ -56,6 +56,7 @@ export async function thread(db,env,uid,target,messageId=null){
   await db.prepare("UPDATE support_messages SET is_unread=0 WHERE user_tg_id=? AND direction='incoming'").bind(target).run();
   const txt=messages.slice().reverse().map(m=>`#${m.id} ${m.direction==='incoming'?'👤 العميل':'🎧 الدعم'} • ${baghdadDate(m.created_at)}\n${preview(m)}`).join('\n\n');
   const rows=messages.filter(m=>m.kind!=='text').slice(0,6).map(m=>[button(`📎 عرض ${m.kind==='photo'?'الصورة':'الفيديو'} #${m.id}`,`support_media:${m.id}`,'primary')]);
+  for(const m of messages.filter(m=>m.kind==='text'||m.body?.length>50))rows.push([button(`📖 قراءة الرسالة كاملة #${m.id}`,`support_full:${m.id}`,'primary')]);
   rows.push([button('↩️ الرد',`support_reply:${target}`,'success')]);
   rows.push([button('🗑️ حذف رسالة محددة',`support_select_delete:${target}`,'primary')]);
   rows.push([button('🗑️ حذف المحادثة من السجل',`support_delete_local:${target}`,'danger')]);
@@ -85,7 +86,7 @@ async function deleteFromTelegram(db,env,uid,records){
   return {fully,partial,failed};
 }
 export async function handleSupportCallback(db,env,uid,data,messageId=null){
-  if(!/^(?:support_inbox|support_thread:\d+|support_reply:\d+|support_media:\d+|support_select_delete:\d+|support_delete_one:\d+|support_confirm_one:\d+|support_delete_local:\d+|support_delete_both:\d+|support_confirm_local:\d+|support_confirm_both:\d+)$/.test(data))return false;
+  if(!/^(?:support_inbox|support_thread:\d+|support_reply:\d+|support_media:\d+|support_full:\d+|support_select_delete:\d+|support_delete_one:\d+|support_confirm_one:\d+|support_delete_local:\d+|support_delete_both:\d+|support_confirm_local:\d+|support_confirm_both:\d+)$/.test(data))return false;
   if(!isAdmin(env,uid)){await sendText(env,uid,'⛔ هذا القسم للمدير فقط.');return true;}
   if(data==='support_inbox'){await inbox(db,env,uid,messageId);return true}
   const [action,raw]=data.split(':');const id=positiveInt(raw);
@@ -95,6 +96,14 @@ export async function handleSupportCallback(db,env,uid,data,messageId=null){
     if(!await getUser(db,id))return true;
     await setSession(db,uid,'owner_support_reply',{target:id});
     await sendText(env,uid,`↩️ أرسل الرد الآن للمستخدم ${id}.\nيمكنك إرسال نص أو صورة أو فيديو. للإلغاء /cancel.`,keyboard([button('↩️ رجوع للمحادثة',`support_thread:${id}`,'danger')]));return true;
+  }
+  if(action==='support_full'){
+    const item=await db.prepare('SELECT m.id,m.user_tg_id,m.direction,m.kind,m.body,m.created_at,u.first_name,u.username FROM support_messages m JOIN users u ON u.tg_id=m.user_tg_id WHERE m.id=?').bind(id).first();
+    if(!item)return true;
+    const heading=`📖 الرسالة الكاملة #${item.id}\n👤 ${short(item.first_name,80)} ${item.username?'@'+item.username:''}\n🆔 ${item.user_tg_id}\n🗓️ ${baghdadDate(item.created_at)}\n\n`;
+    await sendOrEditText(env,uid,heading+String(item.body||'لا يوجد نص مرفق.'),keyboard(
+      [button('↩️ العودة للمحادثة',`support_thread:${item.user_tg_id}`,'primary')],adminBack()),messageId,{preserveText:true});
+    return true;
   }
   if(action==='support_media'){
     const item=await db.prepare('SELECT * FROM support_messages WHERE id=?').bind(id).first();

@@ -35,8 +35,8 @@ export async function home(db,env,uid,messageId=null) {
   ]);
   const featured=featuredRow.results??[];
   const rate=validRate(visual.usd_rate_iqd);
-  const display=amount=>user?.currency_preference==='USD'&&rate
-    ?formatUSD(Math.round(Number(amount)*100/rate)):formatIQD(amount);
+  const display=amount=>(user?.currency_preference||'USD')==='USD'
+    ?(rate?formatUSD(Math.round(Number(amount)*100/rate)):'$—'):formatIQD(amount);
   const rows=[];
   const homeButton=(id,style='primary')=>isHomeButtonVisible(visual,id)?homeActionButton(visual,id,lang,style):null;
   for(const p of featured)rows.push([withButtonIcon(button(`🌟 ${short(lang==='en'&&p.title_en||p.title,25)} — ${display(p.price_iqd)}`,`product:${p.id}`,'success'),p.custom_emoji_id||visual.product_custom_emoji_id)]);
@@ -60,7 +60,7 @@ export async function home(db,env,uid,messageId=null) {
   const values={
     store:short(visual.store_name||env.STORE_NAME||'My Store',80),name:short(user?.first_name||choice(env,'مستخدم','User'),120),
     id:String(uid),users:shownUsers.toLocaleString('en-US'),
-    balance:user?.currency_preference==='USD'?(rate?'$'+decimalMoney(balance/rate):'$—'):'IQD '+Number(balance).toLocaleString('en-US'),
+    balance:(user?.currency_preference||'USD')==='USD'?(rate?'$'+decimalMoney(balance/rate):'$—'):'IQD '+Number(balance).toLocaleString('en-US'),
     balance_iqd:decimalMoney(balance),balance_usd:rate?decimalMoney(balance/rate):choice(env,'غير محدد','Not configured'),
     instructions:short(visual.storefront_instructions||'',1200)
   };
@@ -75,7 +75,9 @@ export async function categories(db,env,uid,messageId=null) {
   rows.push([button('🔎 البحث','search','primary'),button('🛍️ جميع المنتجات','products:0','success')]);
   rows.push(backRow());
   const decorated=await decoratedMessage(db,'shop','🛍️ أقسام المتجر\n\nاختر القسم الذي تريده:');
-  return sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
+  const sent=await sendOrEditText(env,uid,decorated.text,keyboard(...rows),messageId,decorated.options);
+  if(sent)env.__trackTransient?.(uid,sent);
+  return sent;
 }
 export async function products(db,env,uid,page=0,categoryId=null,query=null,featuredOnly=false,messageId=null) {
   let records;
@@ -84,11 +86,11 @@ export async function products(db,env,uid,page=0,categoryId=null,query=null,feat
   const rows=[];
   // Read currency/rate once per page; independent inventory checks run concurrently.
   const currency=await getUser(db,uid);
-  const rate=currency?.currency_preference==='USD'?await usdRate(db):null;
+  const rate=(currency?.currency_preference||'USD')==='USD'?await usdRate(db):null;
   const [statuses,visual]=await Promise.all([Promise.all(records.map(p=>purchaseAvailability(db,p))),loadVisualSettings(db)]);
   records.forEach((p,index)=>{
     const available=statuses[index];
-    const value=p.price_iqd?(rate?formatUSD(Math.round(p.price_iqd*100/rate)):formatIQD(p.price_iqd)):choice(env,'غير مسعّر','Not priced');
+    const value=p.price_iqd?((currency?.currency_preference||'USD')==='USD'?(rate?formatUSD(Math.round(p.price_iqd*100/rate)):'$—'):formatIQD(p.price_iqd)):choice(env,'غير مسعّر','Not priced');
     rows.push([withButtonIcon(button(`${available.ready?'🟢':'🔴'} ${short(languageOf(env)==='en'&&p.title_en||p.title,29)} — ${value} • ${available.ready?(available.count??choice(env,'متوفر','Available')):choice(env,'غير متاح','Unavailable')}`,`product:${p.id}`,available.ready?'success':'danger'),p.custom_emoji_id||visual.product_custom_emoji_id)]);
   });
   if(!featuredOnly && !query){
@@ -100,7 +102,9 @@ export async function products(db,env,uid,page=0,categoryId=null,query=null,feat
   }
   rows.push([button('🔎 بحث','search'),button('🛍️ الأقسام','categories')]);
   rows.push(backRow());
-  return sendOrEditText(env,uid,records.length?'🛍️ المنتجات المتوفرة في المتجر:':'لا توجد منتجات منشورة هنا حالياً.',keyboard(...rows),messageId);
+  const sent=await sendOrEditText(env,uid,records.length?'🛍️ المنتجات المتوفرة في المتجر:':'لا توجد منتجات منشورة هنا حالياً.',keyboard(...rows),messageId);
+  if(sent)env.__trackTransient?.(uid,sent);
+  return sent;
 }
 export async function productView(db,env,uid,id,messageId=null){
   const p=await getProduct(db,id);
@@ -113,7 +117,7 @@ export async function productView(db,env,uid,id,messageId=null){
   const icon=p.custom_emoji_id||visual.product_custom_emoji_id;
   const stockText=status.ready?`🟢 ${choice(env,'متوفر • المخزون الجاهز:','Available • Ready stock:')} ${status.count??choice(env,'متاح','Available')}`:`🔴 ${choice(env,'غير متوفر •','Unavailable •')} ${languageOf(env)==='en'?translateUi(status.reason,'en'):status.reason}`;
   const rate=validRate(visual.usd_rate_iqd);
-  const shown=p.price_iqd?(user?.currency_preference==='USD'&&rate?formatUSD(Math.round(p.price_iqd*100/rate)):formatIQD(p.price_iqd)):choice(env,'لم يحدد','Not specified');
+  const shown=p.price_iqd?((user?.currency_preference||'USD')==='USD'?(rate?formatUSD(Math.round(p.price_iqd*100/rate)):'$—'):formatIQD(p.price_iqd)):choice(env,'لم يحدد','Not specified');
   const en=languageOf(env)==='en';
   const title=short(en&&p.title_en||p.title,150);
   const how=short(en&&p.usage_instructions_en||p.usage_instructions||choice(env,'لم تُضف تعليمات بعد.','No usage instructions provided.'),1800);
@@ -149,7 +153,7 @@ export async function productView(db,env,uid,id,messageId=null){
 }
 export async function walletSummary(db,uid){
   const u=await getUser(db,uid);
-  const currency=u?.currency_preference||'IQD';
+  const currency=u?.currency_preference||'USD';
   const rate=await usdRate(db);
   const walletIqd=Number(u?.wallet_balance_iqd||0);
   const shown=currency==='USD' ? (rate ? formatUSD(Math.round(walletIqd*100/rate)) : 'الدولار غير مهيأ بعد') : formatIQD(walletIqd);
@@ -158,9 +162,9 @@ export async function walletSummary(db,uid){
 export async function currencyMenu(db,env,uid,messageId=null){
   const {currency,rate}=await walletSummary(db,uid);
   const note=rate?`💱 السعر المعتمد من الإدارة: 1 USD = ${formatIQD(rate)}`:'⚠️ سعر الصرف لم يُحدد بعد من الإدارة؛ لن تظهر أرقام تحويل تخمينية.';
-  return sendOrEditText(env,uid,`🌐 اختر عملة عرض المحفظة والشحن\n\nالحالية: ${currency}\n${note}\n\nلا يؤدي اختيار العملة إلى تحويل الرصيد أو إنشاء أموال جديدة.`,keyboard(
-    [button('🇮🇶 الدينار العراقي IQD','currency_set:IQD','success')],
-    [button('🇺🇸 الدولار الأمريكي USD','currency_set:USD','primary')],backRow()),messageId);
+  return sendOrEditText(env,uid,`💱 إعداد عملة العرض\n\n✅ العملة المحددة: ${currency==='USD'?'🇺🇸 الدولار الأمريكي (USD)':'🇮🇶 الدينار العراقي (IQD)'}\n${note}\n\nاختر عملة واحدة. يتغير عرض الأسعار والمحفظة فقط، ولا يتغير الرصيد الحقيقي.`,keyboard(
+    [button((currency==='USD'?'✅ ':'')+'🇺🇸 الدولار الأمريكي USD','currency_set:USD',currency==='USD'?'success':'primary')],
+    [button((currency==='IQD'?'✅ ':'')+'🇮🇶 الدينار العراقي IQD','currency_set:IQD',currency==='IQD'?'success':'primary')],backRow()),messageId);
 }
 export async function profile(db,env,uid,messageId=null){
   const u=await getUser(db,uid);
@@ -229,7 +233,7 @@ export async function favorites(db,env,uid,messageId=null){
   const items=(await db.prepare('SELECT p.id,p.title,p.price_iqd FROM favorites f JOIN products p ON p.id=f.product_id WHERE f.user_tg_id=? AND p.active=1 ORDER BY p.id DESC LIMIT 20').bind(uid).all()).results??[];
   const [user,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
   const rows=[];for(const item of items){
-    const value=item.price_iqd?(user?.currency_preference==='USD'&&rate?formatUSD(Math.round(item.price_iqd*100/rate)):formatIQD(item.price_iqd)):'غير مسعر';
+    const value=item.price_iqd?((user?.currency_preference||'USD')==='USD'?(rate?formatUSD(Math.round(item.price_iqd*100/rate)):'$—'):formatIQD(item.price_iqd)):'غير مسعر';
     rows.push([button(`${short(item.title,35)} — ${value}`,`product:${item.id}`)]);
   }
   return sendOrEditText(env,uid,items.length?'💗 المفضلة — منتجاتك المحفوظة:':'💗 المفضلة\n\nليس لديك منتجات مفضلة.',keyboard(...rows,backRow()),messageId);
