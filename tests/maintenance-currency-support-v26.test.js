@@ -95,9 +95,9 @@ test('broadcast needs explicit confirmation, sends bold emoji in bounded idempot
    await broadcastAdminCallback(db,env,991,'broadcast_confirm',700);
    const one=c.prepare('SELECT * FROM maintenance_broadcast_jobs').get();
    assert.ok(one&&one.kind==='manual');
-   assert.equal(await stageBroadcasts(db),20);
    assert.equal(c.prepare('SELECT COUNT(*) n FROM notification_outbox WHERE broadcast_job_id=?').get(one.id).n,20);
    assert.equal(await stageBroadcasts(db),20);
+   assert.equal(c.prepare('SELECT COUNT(*) n FROM notification_outbox WHERE broadcast_job_id=?').get(one.id).n,40);
    await stageBroadcasts(db);
    await stageBroadcasts(db);
    const rows=c.prepare('SELECT payload FROM notification_outbox WHERE broadcast_job_id=?').all(one.id);
