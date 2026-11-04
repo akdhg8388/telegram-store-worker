@@ -77,7 +77,7 @@ export async function maintenanceDetail(db,env,uid,id,messageId=null){
  '', '🇮🇶 الرسالة العربية:',s[key(id,'ar')]||(global?globalAr:defaultAr),
  '', '🇬🇧 English:',s[key(id,'en')]||(global?globalEn:defaultEn),
  '', 'تظهر رسالة الصيانة بخط عريض كامل عند المستخدم.',
- ...(global?['','📢 رسالة إعلان انتهاء الصيانة:',resume||'غير محددة — لن يُنشر إعلان تلقائي عند الإنهاء.']:[])];
+ ...(global?['','📢 رسالة إعلان انتهاء الصيانة:',resume?(short(resume,230)+(resume.length>230?'…':'')):'غير محددة — لن يُنشر إعلان تلقائي عند الإنهاء.']:[])];
  return sendOrEditText(env,uid,lines.join('\n'),keyboard(
  [button(active?'✅ إنهاء الصيانة':'🛠️ تشغيل الصيانة','maintenance_toggle:'+id,active?'success':'danger')],
  ...(global?[[button('📢 نشر إعلان عام','broadcast_menu','success')],
