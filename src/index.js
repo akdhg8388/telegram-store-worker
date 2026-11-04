@@ -1,11 +1,24 @@
 import {processUpdate} from './bot.js';
 import {flushOutbox} from './telegram.js';
 import {pollTrc20Payments} from './trc20-cron.js';
+import {authorizeDeployRequest,finishTelegramFromWorker} from './telegram-deploy.js';
 
 export default {
   async fetch(request, env, ctx) {
     const url=new URL(request.url);
     if(request.method==='GET' && url.pathname==='/health')return Response.json({ok:true,service:'telegram-store-worker'});
+    if(request.method==='POST' && url.pathname==='/internal/deploy-telegram'){
+      if(!await authorizeDeployRequest(request,env.WEBHOOK_SECRET))
+        return new Response('Forbidden',{status:403});
+      try{
+        const result=await finishTelegramFromWorker(env,url.origin);
+        return Response.json(result);
+      }catch(error){
+        // Do not leak Telegram bot tokens, response bodies or credentials.
+        console.error('Worker-side Telegram setup failed:',String(error?.message||'').split(' ')[0]);
+        return Response.json({ok:false,error:'Telegram configuration incomplete'},{status:502});
+      }
+    }
     if(request.method!=='POST' || url.pathname!=='/webhook')return new Response('Not found',{status:404});
     if(!env.DB || !env.TELEGRAM_BOT_TOKEN || !env.WEBHOOK_SECRET)return new Response('Service not configured',{status:503});
     const supplied=request.headers.get('X-Telegram-Bot-Api-Secret-Token');
