@@ -151,6 +151,8 @@ test('automatic cron credits the exact received USDT transfer and ignores unrela
 test('Paid button followed by a final verified TXID credits once without split steps',async()=>{
  const {c,db}=setup();try{
   const {intent}=await order(db);
+  // A real wallet top-up session is only processed while top-ups are enabled.
+  c.prepare("INSERT INTO bot_settings(key,value) VALUES('manual_topups_enabled','true') ON CONFLICT(key) DO UPDATE SET value='true'").run();
   const paid=proof(intent,600,'f');
   const {tronAddressHex}=await import('../src/trc20-payments.js');
   const hex=await tronAddressHex(receiver);
