@@ -8,6 +8,7 @@ export const HOME_BUTTONS=Object.freeze([
   {id:'wallet',action:'wallet',ar:'💳 محفظتي',en:'💳 My Wallet',legacy:'wallet_custom_emoji_id'},
   {id:'profile',action:'profile',ar:'👤 ملفي الشخصي',en:'👤 My Profile',legacy:'profile_custom_emoji_id'},
   {id:'currency',action:'currency',ar:'💱 تغيير العملة 🇮🇶/🇺🇸',en:'💱 Change Currency 🇮🇶/🇺🇸'},
+  {id:'terms',action:'terms',ar:'📜 شروط الاستخدام',en:'📜 Terms of Use'},
   {id:'orders',action:'orders',ar:'📦 طلباتي',en:'📦 My Orders',legacy:'orders_custom_emoji_id'},
   {id:'messages',action:'my_support_inbox',ar:'📨 رسائلي',en:'📨 My Messages'},
   {id:'transactions',action:'transactions',ar:'📜 سجل العمليات',en:'📜 Transaction History'},

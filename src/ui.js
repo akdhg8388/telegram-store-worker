@@ -42,7 +42,9 @@ export async function home(db,env,uid,messageId=null) {
   for(const p of featured)rows.push([withButtonIcon(button(`🌟 ${short(lang==='en'&&p.title_en||p.title,25)} — ${display(p.price_iqd)}`,`product:${p.id}`,'success'),p.custom_emoji_id||visual.product_custom_emoji_id)]);
   rows.push([homeButton('shop','success'),homeButton('featured','success')]);
   rows.push([homeButton('wallet','success'),homeButton('profile','success')]);
-  rows.push([homeButton('currency')]);
+  // The terms button has Telegram's uncolored default style. Both labels and
+  // custom emoji IDs already come from the existing bulk visual-settings query.
+  rows.push([homeButton('currency'),homeButton('terms',null)]);
   rows.push([homeButton('orders'),homeButton('transactions')]);
   rows.push([homeButton('referrals'),homeButton('messages','primary')]);
   // Reuse the existing bulk settings query (no additional D1 call).

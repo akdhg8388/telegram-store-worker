@@ -22,6 +22,7 @@ import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20Txid
 import {issueTrc20Claim,parseSplitUsdCents,trc20ClaimMessage,activeTrc20Claim} from './trc20-claims.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
+import {termsPage} from './terms.js';
 
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}) {
   for(const admin of adminIds(env)) {
@@ -280,7 +281,7 @@ async function handleMessage(db,env,ctx,message){
   if(text==='/currency'){await clearSession(db,uid);return ui.currencyMenu(db,env,uid)}
   if(text==='/support'){await clearSession(db,uid);return ui.supportMenu(db,env,uid);}
   if(text==='/paysupport')return sendText(env,uid,'💳 للمساعدة بشأن شراء المحفظة، افتح /support واكتب رقم عملية الشراء.');
-  if(text==='/terms')return sendText(env,uid,await getSetting(db,'terms_text','📜 شروط مبدئية: لا يتم التسليم إلا بعد الدفع وموافقة المدير. تختلف الشروط حسب المنتج. للدعم: /support. حدّث الشروط قبل التشغيل العام.'));
+  if(text==='/terms'){await clearSession(db,uid);return termsPage(db,env,uid)}
   if(text==='/privacy')return sendText(env,uid,await getSetting(db,'privacy_text','🔐 سيتم تحديث سياسة الخصوصية قبل استقبال العملاء.'));
   if(text==='/id')return sendText(env,uid,`🆔 معرف حسابك الرقمي في تيليجرام هو: ${uid}`);
   if(text.startsWith('/reply ') && isAdmin(env,uid)){
@@ -338,6 +339,7 @@ async function adminMenu(db,env,uid,messageId=null){
     [button('📨 رسائل الدعم الفني','support_inbox','primary'),button('🚫 إدارة المستخدمين','admin_users','primary')],
     [button('👤 التواصل المباشر مع المسؤول','admin_support_contact','primary')],
     [button('🎨 تخصيص واجهة المتجر','admin_visuals','primary')],
+    [button('📜 إدارة شروط الاستخدام','admin_terms','primary')],
     [button('🛠️ وضع الصيانة','admin_maintenance','danger')],
     [button('📢 الاشتراك الإجباري','required_manage','primary')],
     [button('🎁 مكافآت الإحالات','refadmin','primary')],
@@ -649,6 +651,7 @@ async function handleCallback(db,env,ctx,q){
   // Legacy Stars orders remain auditable but no new invoice may be initiated.
   if(data.startsWith('pay:') || data.startsWith('confirm_buy:'))return sendText(env,uid,'هذا الزر يعود لنظام شراء قديم. افتح المتجر لاستخدام نظام المحفظة الجديد.');
 
+  if(data==='terms'){await clearSession(db,uid);return termsPage(db,env,uid,q.message?.message_id)}
   if(data==='currency')return ui.currencyMenu(db,env,uid,q.message?.message_id);
   if(data.startsWith('currency_set:')){
     const currency=data.split(':')[1];

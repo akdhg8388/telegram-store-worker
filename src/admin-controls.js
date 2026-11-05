@@ -7,6 +7,7 @@ import {sendText,sendOrEditText,telegram} from './telegram.js';
 import {updateBotProfilePicture} from './bot-profile.js';
 import {setSession,getSession,clearSession,audit,getUser} from './database.js';
 import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './settings.js';
+import {DEFAULT_TERMS} from './terms.js';
 import {boldEntities} from './v25-format.js';
 import {usdRate,receiverFor} from './wallet.js';
 import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,preserveCustomEmojiInTemplate} from './presentation.js';
@@ -34,7 +35,7 @@ export function adminRoute(data){
   if(/^admin_pay_(?:quote:\w+|quote_toggle:\w+|quote_currency:\w+:(?:IQD|USD)|quote_mode:\w+:(?:none|fixed|percent)|quote_edit:\w+)$/.test(data))return true;
   if(/^admin_home_button_color:[a-z_]+(?::(?:default|primary|success|danger))?$/.test(data)
     || /^admin_pay_(?:edit:\w+:icon|icon_delete:\w+)$/.test(data))return true;
-  return /^(?:admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_discounts:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z0-9_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_terms|admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_discounts:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z0-9_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -312,6 +313,23 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await updateSetting(db,'users_display_adjustment','0',uid);
     await audit(db,uid,'reset_display_count','setting',0);
     await sendOrEditText(env,uid,'✅ استُعيد العدد الحقيقي المسجل في D1 دون حذف مستخدمين.',keyboard([button('👥 إعدادات العداد','admin_counter','primary')],adminBack),messageId);
+  }
+  else if(data==='admin_terms'){
+    const value=await getSetting(db,'terms_text','');
+    const configured=value.length>0;
+    await sendOrEditText(env,uid,
+      '📜 إدارة شروط الاستخدام\n\n'+
+      '📝 نص الشروط: '+(configured?'✅ مخصص من الإدارة':'📄 النموذج الافتراضي')+
+      '\n✍️ تقدر تعدل كل التفاصيل (حتى 3500 حرف)، والعناوين تنعرض بخط عريض والشرح بخط عادي.'+
+      '\n✨ اسم الزر ورمزه قابلان للتعديل من نفس اللوحة؛ يقبل إيموجي عادي أو رمز Telegram مخصص.'+
+      '\n🔒 تعديل هذه الصفحة لا يغيّر رصيد أي عميل أو بيانات أي طلب.',
+      keyboard(
+        [button('📝 تعديل نص الشروط','admin_setting_edit:terms_text','success')],
+        [button('✏️ تعديل اسم الزر','admin_setting_edit:home_button_terms_label_ar','primary')],
+        [button('✨ تعديل رمز الزر','admin_setting_edit:home_button_terms_icon','primary')],
+        [button('🎨 لون وظهور الزر','admin_home_button:terms','primary')],
+        [button('👁️ معاينة الشروط','terms','primary')],
+        [button('🛡️ لوحة المدير','admin','primary')]),messageId);
   }
   else if(data==='admin_visuals')await sendOrEditText(env,uid,`🎨 تخصيص واجهة المتجر
 
@@ -832,7 +850,9 @@ export async function handleAdminText(db,env,uid,session,message){
     const custom=(message.entities||[]).find(e=>e.type==='custom_emoji' && /^\d{10,30}$/.test(String(e.custom_emoji_id))
       && Number.isInteger(e.offset) && Number.isInteger(e.length) && e.offset>=0 && e.length>0 && e.offset+e.length<=originalText.length);
     const checkId=custom?.custom_emoji_id || (SETTING_FIELDS[key]?.customEmoji?valid.value:null);
-    if(checkId && await isStaticCustomEmoji(env,checkId)){
+    // Normal Unicode emoji stays supported in the label. The terms icon also
+    // accepts static Telegram custom emoji as requested, not just animated.
+    if(checkId && !['home_button_terms_icon','home_button_terms_label_ar'].includes(key) && await isStaticCustomEmoji(env,checkId)){
       await sendText(env,uid,'⚠️ هذا رمز تيليجرام ثابت مو متحرك. أرسل إيموجي متحرك أو فيديو إيموجي حقيقي، أو /cancel للإلغاء.');
       return true;
     }
