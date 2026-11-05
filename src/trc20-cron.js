@@ -1,5 +1,6 @@
 import {readConfirmedTrc20Transfers,inspectTrc20Transfer,creditVerifiedTrc20,notifyTrc20Alert,configuredTrc20Receiver,trc20TxidIsValid,USDT_CONTRACT} from './trc20-payments.js';
 import {queueNotification} from './telegram.js';
+import {settleTrc20Single} from './trc20-single.js';
 
 // Exactly ONE external TronGrid GET at most per minute. Zero without recent orders.
 // The manual TXID verification path is separate from this Cron worker.
@@ -7,7 +8,7 @@ export async function pollTrc20Payments(db,env){
  const now=Math.floor(Date.now()/1000);
  const receiver=configuredTrc20Receiver(env);
  let credited=0,alerts=0,expired=0,networkCalls=0;
- // Indexed, bounded lookback covers the active 15-minute window and a short
+ // Indexed, bounded lookback covers the active 25-minute window and a short
  // late-payment alert period. Unrelated wallet payments require no D1 writes.
  const intents=receiver?(await db.prepare(
    "SELECT * FROM trc20_payment_intents WHERE receiver=? AND created_at>=? AND status IN ('waiting','expired','cancelled') ORDER BY created_at DESC LIMIT 250"
@@ -18,25 +19,31 @@ export async function pollTrc20Payments(db,env){
      const oldest=Math.min(...intents.map(x=>Number(x.created_at)));
      networkCalls++;
      const events=await readConfirmedTrc20Transfers(env,receiver,oldest*1000);
-     // Only whole, original, still-unpaid quotes can be correlated by amount;
-     // fractional installments are checked via their reserved amount when submitted.
-     const amounts=new Map(intents.filter(intent=>intent.status==='waiting'&&intent.full_quote_active===1).map(intent=>[String(intent.expected_micro),intent]));
+     // New orders match their unique six-decimal fingerprint. Historical
+     // requests continue to require the original exact amount.
+     const amounts=new Map(intents.filter(i=>i.status==='waiting'&&i.flexible_amount!==1&&i.full_quote_active===1).map(i=>[String(i.expected_micro),i]));
+     const fractions=new Map(intents.filter(i=>i.status==='waiting'&&i.flexible_amount===1).map(i=>[Number(i.expected_micro)%1000000,i]));
      for(const event of events){
        if(!trc20TxidIsValid(event.transaction_id)||event.to!==receiver||
          event.type!=='Transfer'||String(event.token_info?.address||'')!==USDT_CONTRACT)
          continue;
-       const intent=amounts.get(String(event.value));
+       const micro=Number(event.value);
+       if(!Number.isSafeInteger(micro)||micro<=0)continue;
+       const intent=amounts.get(String(micro))||fractions.get(micro%1000000);
        if(!intent)continue;
        const outcome=inspectTrc20Transfer(event,intent);
        if(outcome.status==='invalid'||outcome.status==='mismatch')continue;
        if(intent.status==='waiting'&&intent.expires_at>now&&outcome.status==='confirmed'){
          try{
-           await creditVerifiedTrc20(db,intent.user_tg_id,intent.id,outcome.txid,env,outcome.blockTimestamp);
+           if(intent.flexible_amount===1){
+             const payment=await settleTrc20Single(db,intent.user_tg_id,intent.id,outcome,env);
+             if(payment.status!=='credited')continue;
+           }else await creditVerifiedTrc20(db,intent.user_tg_id,intent.id,outcome.txid,env,outcome.blockTimestamp);
            credited++;
            intent.status='credited';
          }catch(e){console.error('TRC20 cron settlement skipped',String(e))}
        }else if(outcome.status==='late'||intent.status==='expired'||intent.status==='cancelled'||intent.expires_at<=now){
-         const reason=intent.status==='cancelled'?'حوالة بعد إلغاء الطلب':'حوالة متأخرة بعد انتهاء مهلة 15 دقيقة';
+         const reason=intent.status==='cancelled'?'حوالة بعد إلغاء الطلب':'حوالة متأخرة بعد انتهاء مهلة الطلب';
          if(await notifyTrc20Alert(db,env,intent,event.transaction_id,reason))alerts++;
        }
      }
@@ -49,7 +56,7 @@ export async function pollTrc20Payments(db,env){
  for(const item of ended){
    expired++;
    await queueNotification(db,'sendMessage',{chat_id:item.user_tg_id,
-     text:'⏰ انتهت مهلة طلب شحن USDT TRC20 (15 دقيقة). لن تُعتمد هذه العملية تلقائياً بعد الآن. إذا حولت بالفعل، تواصل مع الدعم ولا تحول مرة ثانية.'});
+     text:'⏰ انتهت مهلة طلب شحن USDT TRC20 (25 دقيقة). لن تُعتمد هذه العملية تلقائياً بعد الآن. إذا حولت بالفعل، تواصل مع الدعم ولا تحول مرة ثانية.'});
  }
  if(error)throw error;
  return {credited,alerts,expired,networkCalls};

@@ -6,12 +6,13 @@ export const TRC20_METHOD='usdt_trc20';
 export const DEFAULT_TRC20_RECEIVER='TMLhhXpUtAPkaG8Lw6XWuTzzJyou5wMvVR';
 export const TRC20_QR_URL='https://raw.githubusercontent.com/akdhg8388/telegram-store-worker/main/assets/usdt-trc20-qr.png';
 export const USDT_CONTRACT='TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-export const TRC20_TTL_SECONDS=15*60;
+export const TRC20_TTL_SECONDS=25*60;
 const TXID=/^[a-fA-F0-9]{64}$/;
 const ADDRESS=/^T[1-9A-HJ-NP-Za-km-z]{33}$/;
 export const trc20AddressIsValid=x=>ADDRESS.test(String(x||'').trim());
 export const trc20TxidIsValid=x=>TXID.test(String(x||'').trim());
 export const isTrc20Method=method=>method===TRC20_METHOD;
+export const uniqueTrc20FractionMatches=(intent,actual)=>Number.isSafeInteger(actual)&&actual>0&&Number.isSafeInteger(Number(intent?.expected_micro))&&actual%1000000===Number(intent.expected_micro)%1000000;
 export function formatUsdtMicro(micro){
  if(!Number.isSafeInteger(micro)||micro<0)throw new Error('Invalid USDT amount');
  return Math.floor(micro/1000000)+'.'+String(micro%1000000).padStart(6,'0')+' USDT';
@@ -30,16 +31,17 @@ export async function newTrc20Intent(db,uid,quote,method,env={}){
  const pending=await db.prepare("SELECT COUNT(*) n FROM trc20_payment_intents WHERE user_tg_id=? AND status='waiting' AND expires_at>?").bind(uid,now).first();
  if(Number(pending?.n||0)>=3)throw new Error('TRC20_TOO_MANY_PENDING');
  const id=crypto.randomUUID();
- // Use cent-sized unique order tags (e.g. 10.37 USDT). Do not reuse a
- // receiver+amount during the previous 24h: late payments must never fund a new order.
- for(let i=0;i<99;i++){
+ // Generate a six-decimal USDT order fingerprint, unique for 24 hours on the
+ // same receiving address. Any whole amount can be paid if all six decimals match.
+ for(let i=0;i<120;i++){
    const tag=(crypto.getRandomValues(new Uint32Array(1))[0]%99)+1;
-   const micro=(calculated.totalMinor+tag)*10000;
-   const used=await db.prepare('SELECT 1 found FROM trc20_payment_intents WHERE receiver=? AND expected_micro=? AND created_at>? LIMIT 1')
-     .bind(receiver,micro,now-86400).first();
+   const tiny=(crypto.getRandomValues(new Uint32Array(1))[0]%9999)+1;
+   const micro=(calculated.totalMinor+tag)*10000+tiny;
+   const used=await db.prepare('SELECT 1 found FROM trc20_payment_intents WHERE receiver=? AND expected_micro % 1000000=? AND created_at>? LIMIT 1')
+     .bind(receiver,micro%1000000,now-86400).first();
    if(used)continue;
    try{
-     await db.prepare("INSERT INTO trc20_payment_intents(id,user_tg_id,receiver,amount_iqd,requested_currency,requested_amount_minor,quoted_rate_iqd,payment_base_minor,expected_micro,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+     await db.prepare("INSERT INTO trc20_payment_intents(id,user_tg_id,receiver,amount_iqd,requested_currency,requested_amount_minor,quoted_rate_iqd,payment_base_minor,expected_micro,expires_at,flexible_amount) VALUES (?,?,?,?,?,?,?,?,?,?,1)")
        .bind(id,uid,receiver,quote.amountIqd,quote.currency,quote.requestedMinor,quote.rate,calculated.totalMinor,micro,now+TRC20_TTL_SECONDS).run();
      return {intentId:id,expectedUsdtMicro:micro,receiver,expiresAt:now+TRC20_TTL_SECONDS};
    }catch(e){if(!/UNIQUE|constraint/i.test(String(e)))throw e}
@@ -88,8 +90,12 @@ export function inspectTrc20Transfer(event,intent){
  if(!Number.isSafeInteger(ts)||ts<=0)return {status:'invalid'};
  if(ts<Number(intent.created_at)*1000||ts>Number(intent.expires_at)*1000)return {status:'late'};
  let actual;try{actual=BigInt(String(event.value))}catch{return {status:'invalid'}}
+ if(intent.flexible_amount===1){
+   if(actual>BigInt(Number.MAX_SAFE_INTEGER)||actual<=0n||!uniqueTrc20FractionMatches(intent,Number(actual)))return {status:'mismatch'};
+   return {status:'confirmed',txid:String(event.transaction_id).toLowerCase(),amountMicro:Number(actual),blockTimestamp:ts};
+ }
  if(actual!==BigInt(intent.expected_micro))return {status:'mismatch'};
- return {status:'confirmed',txid:String(event.transaction_id).toLowerCase(),blockTimestamp:ts};
+ return {status:'confirmed',txid:String(event.transaction_id).toLowerCase(),amountMicro:Number(actual),blockTimestamp:ts};
 }
 // TXID fallback reads ONE final execution receipt by its exact hash.
 // It doesn't scan/paginate wallet history, which reduces lookup latency.
@@ -135,6 +141,8 @@ export function inspectTrc20Receipt(receipt,intent,txid,recipientHex){
    const micro=BigInt('0x'+amount);
    if(micro<=0n||micro>BigInt(Number.MAX_SAFE_INTEGER))continue;
    if(time<Number(intent.created_at)*1000||time>Number(intent.expires_at)*1000)return {status:'late'};
+   if(intent.flexible_amount===1)
+     return {status:uniqueTrc20FractionMatches(intent,Number(micro))?'confirmed':'mismatch',txid,amountMicro:Number(micro),blockTimestamp:time};
    if(micro>BigInt(intent.expected_micro))return {status:'overpaid',txid,amountMicro:Number(micro),blockTimestamp:time};
    return {status:micro===BigInt(intent.expected_micro)?'confirmed':'partial',txid,amountMicro:Number(micro),blockTimestamp:time};
  }

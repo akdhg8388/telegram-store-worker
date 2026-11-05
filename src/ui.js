@@ -267,12 +267,11 @@ export async function topupTrc20(db,env,uid,intent,quote,messageId=null){
  const body='🔴 شحن المحفظة عبر USDT TRC20\n\n💰 رصيد المحفظة المطلوب: '+formatQuote(quote)+
    '\n💸 قيمة التحويل الدقيقة: '+formatUsdtMicro(intent.expectedUsdtMicro)+
    '\n🌐 الشبكة: TRON (TRC20) فقط\n🏦 عنوان الاستلام:\n'+intent.receiver+
-   '\n\n⚠️ الأفضل إرسال المبلغ الدقيق بالكامل. إذا تريد تدفع على دفعات، اضغط «تقسيم المبلغ» واحجز قيمة كل دفعة قبل إرسالها. أي مبلغ غير محجوز مسبقاً يحتاج مراجعة الإدارة. الشبكة TRC20 فقط.\n⏳ صلاحية الطلب 15 دقيقة. يراقب البوت التحويل تلقائياً كل دقيقة. زر «✅ دفعت» لإرسال TXID كخيار احتياطي.';
+   '\n\n✅ يمكنك إرسال مبلغ أقل أو أكثر؛ يُشحن المبلغ المحوّل فعلياً بعد التحقق.\n🔐 احتفظ بالكسور الستة نفسها تماماً بعد الفاصلة حتى يتعرف النظام على حوالتك. مثال: 500.771234 → 300.771234 أو 600.771234.\n⏳ صلاحية الطلب 25 دقيقة. يفحص البوت الشبكة كل دقيقة، أو اضغط ✅ دفعت ثم أرسل TXID الحقيقي (64 خانة). شبكة TRC20 فقط.';
  const markup=keyboard(
    [{text:'📋 نسخ عنوان محفظة TRC20',copy_text:{text:intent.receiver},style:'primary'}],
    [button('💸 المطلوب: '+formatUsdtMicro(intent.expectedUsdtMicro),'topup_amount_info:'+intent.intentId,'success')],
    [button('✅ دفعت','topup_trc20_paid:'+intent.intentId,'success')],
-   [button('➗ تقسيم المبلغ إلى دفعات','topup_trc20_split:'+intent.intentId,'primary')],
    [button('❌ إلغاء الطلب','topup_cancel','danger')]);
  // Telegram copies the address natively (no new callback or database query).
  // Code formatting also makes the address easier to select in its caption.
