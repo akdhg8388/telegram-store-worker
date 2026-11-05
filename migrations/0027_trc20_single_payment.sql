@@ -3,6 +3,11 @@
 ALTER TABLE trc20_payment_intents ADD COLUMN flexible_amount INTEGER NOT NULL DEFAULT 0
   CHECK(flexible_amount IN (0,1));
 -- No backfill: old requests retain exact-amount verification rules.
+-- Enforce six-decimal fingerprint uniqueness for every new flexible order.
+-- DB-level uniqueness also protects simultaneous bot requests.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trc20_flexible_fraction
+ ON trc20_payment_intents(receiver,(expected_micro % 1000000))
+ WHERE flexible_amount=1;
 CREATE TABLE IF NOT EXISTS trc20_single_transfers (
  intent_id TEXT PRIMARY KEY REFERENCES trc20_payment_intents(id),
  txid TEXT NOT NULL UNIQUE,
