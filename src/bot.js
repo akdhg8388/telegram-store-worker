@@ -20,6 +20,7 @@ import {paymentQuote,transferSummary} from './payment-quote.js';
 import {trackTopupView,cleanTopupViews} from './topup-cleanup.js';
 import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20TxidIsValid,verifyTrc20Payment,creditVerifiedTrc20,acceptVerifiedTrc20Part,trc20PaymentProgress,formatUsdtMicro,notifyTrc20Alert} from './trc20-payments.js';
 import {settleTrc20Single} from './trc20-single.js';
+import {submitWholeTrc20ForReview} from './trc20-whole.js';
 import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './required-channels.js';
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 import {termsPage} from './terms.js';
@@ -154,6 +155,30 @@ async function handleTextState(db,env,ctx,uid,message,session) {
       unconfigured:'⛔ خدمة التحقق غير مهيأة لدى الإدارة. لم يتم شحن الرصيد.',
       invalid:'❌ TXID غير صالح.'
     })[result.status]||'⚠️ لم نجد حوالة مؤكدة مطابقة لهذه العملية. تأكد من الشبكة ورقم المعاملة.');
+    if(intent.integer_only===1){
+      if(result.status!=='confirmed')return sendText(env,uid,'⏳ الحوالة لم تؤكد بعد عبر TronGrid، ولم يُضف رصيد.');
+      let payment;
+      try{payment=await submitWholeTrc20ForReview(db,uid,intent.id,result,env)}
+      catch(e){console.error('TRC20 whole review failed',String(e));return sendText(env,uid,'⚠️ تعذر حفظ التحقق. احتفظ بـTXID وتواصل مع الدعم؛ لم يُضف رصيد.');}
+      if(payment.status!=='pending_review')return sendText(env,uid,({
+        duplicate:'⚠️ هذه الحوالة مسجلة مسبقاً؛ لا يمكن اعتمادها مرتين.',
+        expired:'⏰ انتهت مهلة الطلب، تواصل مع الدعم إذا حولت.',
+        late:'⏰ الحوالة خارج المهلة؛ تواصل مع الدعم.',
+        amount_out_of_range:'⚠️ مبلغ التحويل خارج حدود المحفظة.',
+        unconfigured:'⛔ تعذر التحقق من إعداد المحفظة.'
+      })[payment.status]||'⚠️ لم تتم إضافة رصيد؛ تواصل مع الدعم.');
+      await clearSession(db,uid);
+      await notifyAdmins(db,env,'🔔 تحويل USDT TRC20 مؤكد عبر TronGrid ويحتاج مراجعة ملكية\n👤 العميل: '+uid+
+        '\n💸 المستلم فعلياً: '+formatUsdtMicro(payment.amountMicro)+
+        '\n💰 القيمة بالدينار: '+formatIQD(payment.creditedIqd)+
+        '\n🧾 TXID: '+txid+'\n⚠️ رقم TXID معلومة عامة؛ تحقق من ملكية الحوالة قبل الاعتماد.',
+        null,keyboard([button('📋 مراجعة الطلب',`topup_detail:${payment.topupId}`,'success')]),{topupRequestId:payment.topupId});
+      ctx.waitUntil(flushOutbox(db,env));
+      return sendText(env,uid,'✅ تأكد وصول حوالة USDT عبر TronGrid.\n💸 المبلغ الفعلي: '+
+        formatUsdtMicro(payment.amountMicro)+'\n💰 القيمة بالدينار: '+formatIQD(payment.creditedIqd)+
+        '\n⏳ الطلب بانتظار مراجعة الإدارة لملكية الحوالة، ولم يُضف الرصيد بعد.\n🧾 رقم الشحن: #'+payment.topupId,
+        keyboard([button('📦 طلباتي','orders','primary')],[button('💳 محفظتي','wallet','success')]));
+    }
     if(intent.flexible_amount===1){
       if(result.status!=='confirmed')return sendText(env,uid,'🔒 الحوالة لا تحمل الكسور الستة الفريدة لطلبك. لم يُشحن رصيد.');
       let payment;
@@ -726,7 +751,7 @@ async function handleCallback(db,env,ctx,q){
     if(!intent||intent.status!=='waiting'||intent.expires_at<=Math.floor(Date.now()/1000))
       return sendText(env,uid,'⏰ انتهى طلب الدفع. تواصل مع الدعم إذا حولت فعلاً.');
     await setSession(db,uid,'topup_trc20_txid',{intentId:id});
-    return sendText(env,uid,'✅ بعد تحويل USDT (مع الحفاظ على الكسور الستة الفريدة)، أرسل رقم المعاملة الحقيقي. المبلغ المرجعي: '+formatUsdtMicro(Number(intent.expected_micro))+
+    return sendText(env,uid,'✅ بعد تحويل USDT، أرسل رقم المعاملة TXID الحقيقي. المبلغ المرجعي: '+(intent.integer_only===1?String(Number(intent.expected_micro)/1000000)+' USDT':formatUsdtMicro(Number(intent.expected_micro)))+
       ' على شبكة TRC20 إلى العنوان المحدد، أرسل الآن رقم المعاملة TXID من سجل السحب في Binance.\n\n🔒 لن يُضاف أي رصيد إلا بعد مطابقة الحوالة المؤكدة.\nللإلغاء /cancel.',
       keyboard([button('❌ إلغاء الطلب','topup_cancel','danger')]));
   }

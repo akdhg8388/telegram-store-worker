@@ -1,7 +1,7 @@
 import {categoryButton} from './category-emoji.js';
 import {methodList,paymentMethod,paymentName,paymentButton} from './payment-methods.js';
 import {formatTransferMinor,transferSummary} from './payment-quote.js';
-import {formatUsdtMicro,TRC20_QR_URL} from './trc20-payments.js';
+import {formatUsdtMicro,formatWholeUsdt,TRC20_QR_URL} from './trc20-payments.js';
 import {warrantyLine} from './warranty.js';
 import {button,keyboard,backRow,formatIQD,formatStars,orderNames,short,moneyMethods,urlButton,isAdmin} from './common.js';
 import {getUser,listCategories,listProducts,getProduct,listOrders,ledger} from './database.js';
@@ -265,12 +265,12 @@ export async function topupMethods(db,env,uid,quote,messageId=null){
 }
 export async function topupTrc20(db,env,uid,intent,quote,messageId=null){
  const body='🔴 شحن المحفظة عبر USDT TRC20\n\n💰 رصيد المحفظة المطلوب: '+formatQuote(quote)+
-   '\n💸 قيمة التحويل الدقيقة: '+formatUsdtMicro(intent.expectedUsdtMicro)+
+   '\n💸 قيمة التحويل الدقيقة: '+formatWholeUsdt(intent.expectedUsdtMicro)+
    '\n🌐 الشبكة: TRON (TRC20) فقط\n🏦 عنوان الاستلام:\n'+intent.receiver+
-   '\n\n✅ يمكنك إرسال مبلغ أقل أو أكثر؛ يُشحن المبلغ المحوّل فعلياً بعد التحقق.\n🔐 احتفظ بالكسور الستة نفسها تماماً بعد الفاصلة حتى يتعرف النظام على حوالتك. مثال: 500.771234 → 300.771234 أو 600.771234.\n⏳ صلاحية الطلب 25 دقيقة. يفحص البوت الشبكة كل دقيقة، أو اضغط ✅ دفعت ثم أرسل TXID الحقيقي (64 خانة). شبكة TRC20 فقط.';
+   '\n\n💸 حوّل المبلغ المطلوب بدون كسور على شبكة TRC20 فقط.\n💰 تُراجع المبالغ الأقل أو الأعلى وفق ما وصل فعلياً.\n⏳ صلاحية الطلب 25 دقيقة. اضغط ✅ دفعت وأرسل TXID الحقيقي (64 خانة).\n🔒 نظراً لاشتراك العملاء بعنوان الاستلام، يعتمد المدير الحوالة بعد التحقق من ملكيتها.';
  const markup=keyboard(
    [{text:'📋 نسخ عنوان محفظة TRC20',copy_text:{text:intent.receiver},style:'primary'}],
-   [button('💸 المطلوب: '+formatUsdtMicro(intent.expectedUsdtMicro),'topup_amount_info:'+intent.intentId,'success')],
+   [button('💸 المطلوب: '+formatWholeUsdt(intent.expectedUsdtMicro),'topup_amount_info:'+intent.intentId,'success')],
    [button('✅ دفعت','topup_trc20_paid:'+intent.intentId,'success')],
    [button('❌ إلغاء الطلب','topup_cancel','danger')]);
  // Telegram copies the address natively (no new callback or database query).

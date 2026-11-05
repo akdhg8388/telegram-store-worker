@@ -11,7 +11,7 @@ export async function pollTrc20Payments(db,env){
  // Indexed, bounded lookback covers the active 25-minute window and a short
  // late-payment alert period. Unrelated wallet payments require no D1 writes.
  const intents=receiver?(await db.prepare(
-   "SELECT * FROM trc20_payment_intents WHERE receiver=? AND created_at>=? AND status IN ('waiting','expired','cancelled') ORDER BY created_at DESC LIMIT 250"
+   "SELECT * FROM trc20_payment_intents WHERE receiver=? AND created_at>=? AND integer_only=0 AND status IN ('waiting','expired','cancelled') ORDER BY created_at DESC LIMIT 250"
  ).bind(receiver,now-30*60).all()).results||[]:[];
  let error=null;
  if(receiver&&env.TRONGRID_API_KEY&&intents.length){

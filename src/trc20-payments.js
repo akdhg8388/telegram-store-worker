@@ -12,6 +12,7 @@ const ADDRESS=/^T[1-9A-HJ-NP-Za-km-z]{33}$/;
 export const trc20AddressIsValid=x=>ADDRESS.test(String(x||'').trim());
 export const trc20TxidIsValid=x=>TXID.test(String(x||'').trim());
 export const isTrc20Method=method=>method===TRC20_METHOD;
+export function formatWholeUsdt(micro){return Number.isSafeInteger(micro)&&micro>=0&&micro%1000000===0?String(micro/1000000)+' USDT':formatUsdtMicro(micro)}
 export const uniqueTrc20FractionMatches=(intent,actual)=>Number.isSafeInteger(actual)&&actual>0&&Number.isSafeInteger(Number(intent?.expected_micro))&&actual%1000000===Number(intent.expected_micro)%1000000;
 export function formatUsdtMicro(micro){
  if(!Number.isSafeInteger(micro)||micro<0)throw new Error('Invalid USDT amount');
@@ -31,22 +32,14 @@ export async function newTrc20Intent(db,uid,quote,method,env={}){
  const pending=await db.prepare("SELECT COUNT(*) n FROM trc20_payment_intents WHERE user_tg_id=? AND status='waiting' AND expires_at>?").bind(uid,now).first();
  if(Number(pending?.n||0)>=3)throw new Error('TRC20_TOO_MANY_PENDING');
  const id=crypto.randomUUID();
- // Generate a six-decimal USDT order fingerprint, unique for 24 hours on the
- // same receiving address. Any whole amount can be paid if all six decimals match.
- for(let i=0;i<120;i++){
-   const tag=(crypto.getRandomValues(new Uint32Array(1))[0]%99)+1;
-   const tiny=(crypto.getRandomValues(new Uint32Array(1))[0]%9999)+1;
-   const micro=(calculated.totalMinor+tag)*10000+tiny;
-   const used=await db.prepare('SELECT 1 found FROM trc20_payment_intents WHERE receiver=? AND expected_micro % 1000000=? AND created_at>? LIMIT 1')
-     .bind(receiver,micro%1000000,now-86400).first();
-   if(used)continue;
-   try{
-     await db.prepare("INSERT INTO trc20_payment_intents(id,user_tg_id,receiver,amount_iqd,requested_currency,requested_amount_minor,quoted_rate_iqd,payment_base_minor,expected_micro,expires_at,flexible_amount) VALUES (?,?,?,?,?,?,?,?,?,?,1)")
-       .bind(id,uid,receiver,quote.amountIqd,quote.currency,quote.requestedMinor,quote.rate,calculated.totalMinor,micro,now+TRC20_TTL_SECONDS).run();
-     return {intentId:id,expectedUsdtMicro:micro,receiver,expiresAt:now+TRC20_TTL_SECONDS};
-   }catch(e){if(!/UNIQUE|constraint/i.test(String(e)))throw e}
- }
- throw new Error('TRC20_SLOTS_EXHAUSTED');
+ // Whole USDT only. Preserve the owner-set exchange rate and any fee,
+ // rounding UP when the quote contains a fractional dollar.
+ const dollars=Math.ceil(calculated.totalMinor/100);
+ if(!Number.isSafeInteger(dollars)||dollars<1||dollars>10000)throw new Error('TRC20_AMOUNT_OUT_OF_RANGE');
+ const micro=dollars*1000000;
+ await db.prepare("INSERT INTO trc20_payment_intents(id,user_tg_id,receiver,amount_iqd,requested_currency,requested_amount_minor,quoted_rate_iqd,payment_base_minor,expected_micro,expires_at,flexible_amount,integer_only) VALUES (?,?,?,?,?,?,?,?,?,?,0,1)")
+   .bind(id,uid,receiver,quote.amountIqd,quote.currency,quote.requestedMinor,quote.rate,calculated.totalMinor,micro,now+TRC20_TTL_SECONDS).run();
+ return {intentId:id,expectedUsdtMicro:micro,receiver,expiresAt:now+TRC20_TTL_SECONDS};
 }
 export async function cancelTrc20Intent(db,uid,id){
  if(!id)return;
@@ -90,6 +83,10 @@ export function inspectTrc20Transfer(event,intent){
  if(!Number.isSafeInteger(ts)||ts<=0)return {status:'invalid'};
  if(ts<Number(intent.created_at)*1000||ts>Number(intent.expires_at)*1000)return {status:'late'};
  let actual;try{actual=BigInt(String(event.value))}catch{return {status:'invalid'}}
+ if(intent.integer_only===1){
+   if(actual>BigInt(Number.MAX_SAFE_INTEGER)||actual<=0n)return {status:'invalid'};
+   return {status:'confirmed',txid:String(event.transaction_id).toLowerCase(),amountMicro:Number(actual),blockTimestamp:ts};
+ }
  if(intent.flexible_amount===1){
    if(actual>BigInt(Number.MAX_SAFE_INTEGER)||actual<=0n||!uniqueTrc20FractionMatches(intent,Number(actual)))return {status:'mismatch'};
    return {status:'confirmed',txid:String(event.transaction_id).toLowerCase(),amountMicro:Number(actual),blockTimestamp:ts};
@@ -141,6 +138,7 @@ export function inspectTrc20Receipt(receipt,intent,txid,recipientHex){
    const micro=BigInt('0x'+amount);
    if(micro<=0n||micro>BigInt(Number.MAX_SAFE_INTEGER))continue;
    if(time<Number(intent.created_at)*1000||time>Number(intent.expires_at)*1000)return {status:'late'};
+   if(intent.integer_only===1)return {status:'confirmed',txid,amountMicro:Number(micro),blockTimestamp:time};
    if(intent.flexible_amount===1)
      return {status:uniqueTrc20FractionMatches(intent,Number(micro))?'confirmed':'mismatch',txid,amountMicro:Number(micro),blockTimestamp:time};
    if(micro>BigInt(intent.expected_micro))return {status:'overpaid',txid,amountMicro:Number(micro),blockTimestamp:time};
