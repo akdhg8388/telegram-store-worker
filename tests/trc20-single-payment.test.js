@@ -33,6 +33,10 @@ const method={method_key:TRC20_METHOD,pay_currency:'USD',quote_enabled:1,fee_mod
 const quote={currency:'USD',requestedMinor:50000,amountIqd:760000,rate:1520};
 async function order(db,uid=101){
  const value=await newTrc20Intent(db,uid,quote,method,env);
+ // Exercise historical fractional invoices without modifying production logic.
+ // Fresh invoices now have whole USDT and are tested separately below.
+ const fingerprint=((Math.floor(Math.random()*890000)+100000)*1);
+ await db.prepare('UPDATE trc20_payment_intents SET expected_micro=expected_micro+?,flexible_amount=1,integer_only=0 WHERE id=?').bind(fingerprint,value.intentId).run();
  const intent=await db.prepare('SELECT * FROM trc20_payment_intents WHERE id=?').bind(value.intentId).first();
  return {value,intent};
 }
@@ -189,5 +193,50 @@ test('Paid button followed by a final verified TXID credits once without split s
    assert.equal(c.prepare("SELECT COUNT(*) n FROM wallet_ledger WHERE kind='topup'").get().n,1);
    assert.ok(calls.some(x=>x.method==='sendMessage'&&x.body.text.includes('تم تأكيد تحويل USDT')));
   }finally{globalThis.fetch=priorFetch}
+ }finally{c.close()}
+});
+
+test('whole-dollar invoices show 500 USDT and preserve IQD rate 1520 for converted requests',async()=>{
+ const {c,db}=setup();try{
+  const invoice=await newTrc20Intent(db,101,quote,method,env);
+  const row=c.prepare('SELECT * FROM trc20_payment_intents WHERE id=?').get(invoice.intentId);
+  assert.equal(row.integer_only,1);
+  assert.equal(row.flexible_amount,0);
+  assert.equal(row.expected_micro,500000000);
+  assert.equal(row.quoted_rate_iqd,1520);
+  const otherQuote={currency:'IQD',requestedMinor:760000,amountIqd:760000,rate:1520};
+  const second=await newTrc20Intent(db,102,otherQuote,method,env);
+  assert.equal(second.expectedUsdtMicro,500000000);
+  assert.equal(c.prepare('SELECT COUNT(*) AS n FROM trc20_payment_intents WHERE integer_only=1').get().n,2);
+  assert.equal(invoice.expiresAt-row.created_at,1500);
+ }finally{c.close()}
+});
+test('a confirmed whole-dollar deposit is only queued for owner attribution, never auto-credited',async()=>{
+ const {c,db}=setup();try{
+  const invoice=await newTrc20Intent(db,101,quote,method,env);
+  const {submitWholeTrc20ForReview}=await import('../src/trc20-whole.js');
+  const intent=c.prepare('SELECT * FROM trc20_payment_intents WHERE id=?').get(invoice.intentId);
+  const payment={txid:'9'.repeat(64),amountMicro:300000000,blockTimestamp:(intent.created_at+1)*1000};
+  const review=await submitWholeTrc20ForReview(db,101,intent.id,payment,env);
+  assert.equal(review.status,'pending_review');
+  assert.equal(review.creditedIqd,456000);
+  const row=c.prepare('SELECT * FROM topup_requests WHERE id=?').get(review.topupId);
+  assert.equal(row.amount_iqd,456000);
+  assert.equal(row.status,'pending');
+  assert.equal(c.prepare('SELECT wallet_balance_iqd AS n FROM users WHERE tg_id=101').get().n,0);
+  assert.equal(c.prepare("SELECT COUNT(*) AS n FROM wallet_ledger WHERE kind='topup'").get().n,0);
+  assert.equal((await submitWholeTrc20ForReview(db,101,intent.id,payment,env)).status,'expired');
+  assert.equal((await submitWholeTrc20ForReview(db,102,intent.id,payment,env)).status,'expired');
+ }finally{c.close()}
+});
+test('whole USDT receipt validation accepts confirmed transfer regardless of amount, but rejects fake contract',async()=>{
+ const {c,db}=setup();try{
+  const invoice=await newTrc20Intent(db,101,quote,method,env);
+  const intent=c.prepare('SELECT * FROM trc20_payment_intents WHERE id=?').get(invoice.intentId);
+  const base={transaction_id:'8'.repeat(64),to:receiver,type:'Transfer',confirmed:true,token_info:{address:USDT_CONTRACT,decimals:6},
+    block_timestamp:(intent.created_at+1)*1000,value:'600000000'};
+  assert.equal(inspectTrc20Transfer(base,intent).amountMicro,600000000);
+  assert.equal(inspectTrc20Transfer({...base,token_info:{address:'NotUSDT',decimals:6}},intent).status,'invalid');
+  assert.equal(inspectTrc20Transfer({...base,confirmed:false},intent).status,'invalid');
  }finally{c.close()}
 });
