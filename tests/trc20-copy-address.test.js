@@ -16,7 +16,8 @@ test('TRC20 user-facing photo copies the exact address with one tap',async()=>{
    const quote={currency:'USD',requestedMinor:5000,amountIqd:76000,rate:1520};
    const result=await topupTrc20(null,env,12345,intent,quote);
    assert.equal(result.message_id,717);
-   assert.match(sent.caption,/15 دقيقة/);
+   assert.match(sent.caption,/25 دقيقة/);
+   assert.ok(!sent.reply_markup.inline_keyboard.flat().some(btn=>String(btn.callback_data||'').startsWith('topup_trc20_split:')));
    assert.equal(sent.reply_markup.inline_keyboard[0][0].copy_text.text,address);
    assert.equal(sent.reply_markup.inline_keyboard[0][0].callback_data,undefined);
    const entity=sent.caption_entities.find(x=>x.type==='code');
