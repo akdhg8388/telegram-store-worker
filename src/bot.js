@@ -220,7 +220,7 @@ async function handleTextState(db,env,ctx,uid,message,session) {
         '✅ تم التأكد من الدفعة وحفظها ضمن طلب الشحن.\n\n💰 المبلغ المطلوب: '+formatUsdtMicro(intent.expected_micro)+
         '\n✅ مجموع المستلم: '+formatUsdtMicro(payment.receivedMicro)+
         '\n💸 المتبقي للتحويل: '+formatUsdtMicro(payment.remainingMicro)+
-        '\n\n⏱️ أكمل المتبقي خلال مهلة الطلب الأصلية (15 دقيقة).\n🧾 بعد الحوالة المكملة، أرسل TXID الجديد هنا.\n🔒 رصيد المحفظة لن يُشحن إلا بعد اكتمال المبلغ.',
+        '\n\n⏱️ أكمل المتبقي خلال مهلة الطلب الأصلية (25 دقيقة).\n🧾 بعد الحوالة المكملة، أرسل TXID الجديد هنا.\n🔒 رصيد المحفظة لن يُشحن إلا بعد اكتمال المبلغ.',
         keyboard([button('➕ تحديد مبلغ الدفعة التالية','topup_trc20_split:'+intent.id,'primary')],[button('❌ إلغاء الطلب','topup_cancel','danger')]));
     }
     await clearSession(db,uid);
@@ -709,7 +709,7 @@ async function handleCallback(db,env,ctx,q){
     const id=data.slice('topup_amount_info:'.length);
     if(session?.action==='topup_trc20_txid'&&session.payload.intentId===id){
       const intent=await findTrc20Intent(db,uid,id);
-      return answerCallback(env,q.id,intent?'حوّل المبلغ الدقيق '+formatUsdtMicro(intent.expected_micro):'انتهى الطلب');
+      return answerCallback(env,q.id,intent?'حوّل المبلغ المطلوب '+(intent.integer_only===1?String(intent.expected_micro/1000000)+' USDT':formatUsdtMicro(intent.expected_micro)):'انتهى الطلب');
     }
     const ok=session?.action==='topup_evidence'&&session.payload?.quoteKey===id;
     return answerCallback(env,q.id,ok?transferSummary(session.payload):'انتهت هذه الخطوة. ابدأ طلباً جديداً.');
