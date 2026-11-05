@@ -29,7 +29,11 @@ test('first four home action buttons are green, remaining blue; admin never appe
     const owner=flatten(calls[0]);
     for(const data of ['categories','featured','wallet','profile'])assert.equal(owner.find(b=>b.callback_data===data).style,'success',data);
     for(const data of ['currency','orders','transactions','referrals','my_support_inbox','support','news','admin'])assert.equal(owner.find(b=>b.callback_data===data).style,'primary',data);
-    assert.ok(owner.every(b=>b.style==='success'||b.style==='primary'||b.style==='danger'));
+    const terms=owner.find(b=>b.callback_data==='terms');
+    assert.ok(terms,'Terms of Use must appear next to currency');
+    assert.equal(terms.style,undefined,'Terms button must use Telegram’s neutral default style');
+    assert.ok(owner.every(b=>b.callback_data==='terms'||b.style==='success'||b.style==='primary'||b.style==='danger'));
+    assert.deepEqual(calls[0].body.reply_markup.inline_keyboard.find(row=>row.some(b=>b.callback_data==='currency')).map(b=>b.callback_data),['currency','terms']);
     assert.ok(!flatten(calls[1]).some(b=>b.callback_data==='admin'));
  });}finally{conn.close()}
 });
