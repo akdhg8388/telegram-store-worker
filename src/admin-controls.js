@@ -61,9 +61,9 @@ async function homeButtonDetail(db,env,uid,key,messageId=null){
   const visual=await loadVisualSettings(db);
   const ar=resolvedHomeButton(visual,key,'ar');
   const visible=visual[homeSettingKey(key,'visible')]!=='false';
-  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n✨ الرمز المتحرك: ${ar.icon?'مضاف ✅':'غير مضاف'}\n👁️ الحالة: ${visible?'ظاهر':'مخفي'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
+  return sendOrEditText(env,uid,`🎨 تخصيص الزر: ${def.ar}\n\n🇮🇶 العربي: ${ar.text}\n✨ ${key==='terms'?'الرمز الثابت أو المتحرك':'الرمز المتحرك'}: ${ar.icon?'مضاف ✅':'غير مضاف'}\n👁️ الحالة: ${visible?'ظاهر':'مخفي'}\n\nتقدر ترسل الاسم مع الإيموجي المتحرك بأوله أو بآخره مباشرة. البوت يحفظ الرمز ويضيفه كأيقونة للزر؛ موقع الأيقونة وحركتها يحددهما تطبيق تيليجرام. وظيفة الزر ما تتغير.`,keyboard(
     [button('✏️ تعديل الاسم العربي',`admin_setting_edit:${homeSettingKey(key,'label_ar')}`)],
-    [button('✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
+    [button(key==='terms'?'✨ تعديل الرمز الثابت أو المتحرك':'✨ تعديل الرمز المتحرك',`admin_setting_edit:${homeSettingKey(key,'icon')}`)],
     [button('🌈 تغيير لون الزر',`admin_home_button_color:${key}`,'primary')],
     ...(key==='messages'?[[button('📝 تعديل الوصف العربي',`admin_setting_edit:${homeSettingKey(key,'description_ar')}`)]]:[]),
     [button(visible?'🙈 إخفاء هذا الزر':'👁️ إظهار هذا الزر',`admin_home_button_toggle:${key}`,visible?'danger':'success')],
