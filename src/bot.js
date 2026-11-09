@@ -710,11 +710,15 @@ async function handleCallback(db,env,ctx,q){
         return sendText(env,uid,'⛔ الجنيه المصري غير مفعّل حالياً. اختر الدولار أو الدينار.');
       if(existing?.currency_preference!=='EGP')
         await db.prepare('INSERT OR IGNORE INTO user_egp_display(user_tg_id) VALUES(?)').bind(uid).run();
-    }else if(existing?.currency_preference!==currency){
-      await db.batch([
-        db.prepare('DELETE FROM user_egp_display WHERE user_tg_id=?').bind(uid),
-        db.prepare('UPDATE users SET currency_preference=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(currency,uid)
-      ]);
+    }else{
+      // Clear even a disabled EGP overlay; otherwise re-enabling EGP could
+      // override the customer's explicitly chosen USD/IQD preference.
+      if(existing?.currency_preference!==currency){
+        await db.batch([
+          db.prepare('DELETE FROM user_egp_display WHERE user_tg_id=?').bind(uid),
+          db.prepare('UPDATE users SET currency_preference=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(currency,uid)
+        ]);
+      }else await db.prepare('DELETE FROM user_egp_display WHERE user_tg_id=?').bind(uid).run();
     }
     return ui.currencyMenu(db,env,uid,q.message?.message_id);
   }

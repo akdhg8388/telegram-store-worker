@@ -56,7 +56,7 @@ export function quoteMinor(currency,minor,rate){
 export function parseCustomMinor(input,currency){
   const value=String(input).trim().replace(/,/g,'');
   if(currency==='IQD')return /^\d{1,8}$/.test(value) ? Number(value):null;
-  if(!/^(?:\d{1,4})(?:\.\d{1,2})?$/.test(value))return null;
+  if(!new RegExp(currency==='EGP'?'^\\d{1,6}(?:\\.\\d{1,2})?$':'^\\d{1,4}(?:\\.\\d{1,2})?$').test(value))return null;
   const [whole,fraction='']=value.split('.');
   const minor=Number(whole)*100+Number(fraction.padEnd(2,'0'));
   return Number.isSafeInteger(minor)?minor:null;

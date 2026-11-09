@@ -250,7 +250,7 @@ export async function favorites(db,env,uid,messageId=null){
 }
 export async function topupPresets(db,env,uid,messageId=null){
   const w=await walletSummary(db,uid);
-  if(!w.rate)return transientText(env,uid,'⚠️ يجب على المدير تحديد سعر صرف الدولار بالدينار من لوحة الإعدادات قبل إنشاء طلبات الشحن.',keyboard([button('💳 محفظتي','wallet','primary')],backRow()),messageId);
+  if(!w.rate||w.currency==='EGP'&&!w.egpRateMinor)return transientText(env,uid,'⚠️ سعر الصرف غير مهيأ؛ يجب على المدير ضبط الدولار والجنيه المصري.',keyboard([button('💳 محفظتي','wallet','primary')],backRow()),messageId);
   const rows=[];
   for(let i=0;i<USD_PRESETS.length;i+=3){
     rows.push(USD_PRESETS.slice(i,i+3).map(usd=>{
