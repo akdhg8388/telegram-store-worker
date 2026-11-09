@@ -1,4 +1,5 @@
 import {baghdadDate} from './wallet.js';
+import {formatEgpMinor} from './display-currency.js';
 import {formatIQD,short} from './common.js';
 import {getUser} from './database.js';
 
@@ -40,5 +41,7 @@ export function amountInIQD(text,ceiling=10000000){
   return Number.isSafeInteger(amount)&&amount>=1&&amount<=Math.min(ceiling,10000000)?amount:null;
 }
 export function topupDecisionText(record,credit){
-  return `📋 تأكيد شحن الطلب #${record.id}\n\n💰 المبلغ المطلوب: ${formatIQD(record.amount_iqd)}\n✅ المبلغ الذي وصل فعلياً: ${formatIQD(credit)}\n\nتأكد من وصول التحويل قبل الاعتماد النهائي.`;
+  const egp=record.display_currency==='EGP'&&Number.isSafeInteger(record.display_amount_minor)
+    ?'🇪🇬 المبلغ المطلوب بالجنيه: '+formatEgpMinor(record.display_amount_minor)+'\n':'';
+  return `📋 تأكيد شحن الطلب #${record.id}\n\n${egp}💰 المقابل المحاسبي: ${formatIQD(record.amount_iqd)}\n✅ المبلغ المعتمد: ${formatIQD(credit)}\n\nتأكد من وصول التحويل وملكيته قبل الاعتماد النهائي.`;
 }

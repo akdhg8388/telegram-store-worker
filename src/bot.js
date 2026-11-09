@@ -467,7 +467,7 @@ async function topupDetail(db,env,uid,id,messageId=null){
   const t=await db.prepare('SELECT t.*,u.first_name,u.username FROM topup_requests t JOIN users u ON u.tg_id=t.user_tg_id WHERE t.id=?').bind(id).first();
   if(!t)return sendText(env,uid,'الطلب غير موجود.');
   const detailName=paymentName(await paymentMethod(db,env,t.custom_method_key||t.method),'ar');
-  const summary=`📋 طلب شحن #${id}\n\n👤 الاسم: ${short(t.first_name,80)}\n🔗 المعرف: ${t.username?'@'+t.username:'غير متوفر'}\n🆔 Telegram ID: ${t.user_tg_id}\n💰 المبلغ المطلوب: ${formatIQD(t.amount_iqd)}\n💸 الوسيلة: ${detailName}\n🔢 رقم الحوالة: ${short(t.transfer_reference||'غير مرفق',150)}\n📸 الإثبات: ${t.proof_file_id?'صورة مرفقة':'رقم حوالة'}\n🗓️ تاريخ الطلب: ${baghdadDate(t.created_at)}\n📌 الحالة: ${t.status==='pending'?'قيد المراجعة':t.status==='approved'?'✅ مكتمل':'❌ مرفوض'}${t.decided_at?'\n🗓️ تاريخ القرار: '+baghdadDate(t.decided_at):''}${t.credited_amount_iqd!==null?'\n✅ المبلغ المعتمد: '+formatIQD(t.credited_amount_iqd):''}`;
+  const summary=`📋 طلب شحن #${id}\n\n👤 الاسم: ${short(t.first_name,80)}\n🔗 المعرف: ${t.username?'@'+t.username:'غير متوفر'}\n🆔 Telegram ID: ${t.user_tg_id}\n💰 المبلغ المطلوب: ${t.display_currency==='EGP'&&t.display_amount_minor?formatEgpMinor(t.display_amount_minor)+' (≈ '+formatIQD(t.amount_iqd)+')':formatIQD(t.amount_iqd)}\n💸 الوسيلة: ${detailName}\n🔢 رقم الحوالة: ${short(t.transfer_reference||'غير مرفق',150)}\n📸 الإثبات: ${t.proof_file_id?'صورة مرفقة':'رقم حوالة'}\n🗓️ تاريخ الطلب: ${baghdadDate(t.created_at)}\n📌 الحالة: ${t.status==='pending'?'قيد المراجعة':t.status==='approved'?'✅ مكتمل':'❌ مرفوض'}${t.decided_at?'\n🗓️ تاريخ القرار: '+baghdadDate(t.decided_at):''}${t.credited_amount_iqd!==null?'\n✅ المبلغ المعتمد: '+formatIQD(t.credited_amount_iqd):''}`;
   const rows=[];
   if(t.proof_file_id)rows.push([button('📷 عرض صورة الإثبات',`topup_photo:${id}`,'primary')]);
   if(t.status==='pending')rows.push([button('✅ مراجعة القبول',`topup_approve:${id}`,'success'),button('❌ رفض',`topup_reject:${id}`,'danger')]);
@@ -506,8 +506,11 @@ async function settleTopup(db,env,ctx,uid,id,amount=null,messageId=null){
   const current=await db.prepare('SELECT * FROM topup_requests WHERE id=?').bind(id).first();
   const customer=await getUser(db,current.user_tg_id);
   const settledName=paymentName(await paymentMethod(db,env,current.custom_method_key||current.method),'ar');
-  const notice=approved?`✅ تم شحن محفظتك بنجاح!\n\n🧾 رقم الطلب: #${id}\n💰 المبلغ المطلوب: ${formatIQD(current.amount_iqd)}\n✅ المبلغ المضاف فعلياً: ${formatIQD(amount)}\n💳 رصيد المحفظة: ${formatIQD(customer.wallet_balance_iqd)}\n💸 الوسيلة: ${settledName}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت الاعتماد: ${baghdadDate(current.decided_at)}\n🟢 الحالة: مكتملة\n\nشكراً لاستخدامك My Store.`
-    :`❌ تم رفض طلب شحن المحفظة #${id}.\n\n💰 المبلغ المطلوب: ${formatIQD(current.amount_iqd)}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت القرار: ${baghdadDate(current.decided_at)}\nلم تتم إضافة أي مبلغ. للمساعدة افتح قسم الدعم.`;
+  const fx=await usdRate(db);
+  const egp=customer?.currency_preference==='EGP'?await egpRate(db):null;
+  const customerAmount=value=>formatPreferredIQD(value,customer?.currency_preference||'USD',fx,egp);
+  const notice=approved?`✅ تم شحن محفظتك بنجاح!\n\n🧾 رقم الطلب: #${id}\n💰 المبلغ المطلوب: ${customerAmount(current.amount_iqd)}\n✅ المبلغ المضاف فعلياً: ${customerAmount(amount)}\n💳 رصيد المحفظة: ${customerAmount(customer.wallet_balance_iqd)}\n💸 الوسيلة: ${settledName}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت الاعتماد: ${baghdadDate(current.decided_at)}\n🟢 الحالة: مكتملة\n\nشكراً لاستخدامك My Store.`
+    :`❌ تم رفض طلب شحن المحفظة #${id}.\n\n💰 المبلغ المطلوب: ${customerAmount(current.amount_iqd)}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت القرار: ${baghdadDate(current.decided_at)}\nلم تتم إضافة أي مبلغ. للمساعدة افتح قسم الدعم.`;
   await notifyUser(db,current.user_tg_id,notice,keyboard([button('📦 طلباتي','orders','primary'),button('💳 محفظتي','wallet','success')]),approved?{entities:boldEntities(notice)}:{});
   // Financial commit and customer notification are already durable. Cleanup is
   // best-effort and scheduled separately to keep approval latency low.
