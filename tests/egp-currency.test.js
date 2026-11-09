@@ -9,7 +9,8 @@ import {quoteFromUSD,egpTopupQuote,formatQuote,parseCustomMinor,topupStatusMessa
 import {getUser} from '../src/database.js';
 import {validateSetting,updateSetting} from '../src/settings.js';
 import {paymentQuote} from '../src/payment-quote.js';
-import {currencyMenu} from '../src/ui.js';
+import {currencyMenu,home,products,wallet,walletSummary} from '../src/ui.js';
+import {rateFromVisual} from '../src/display-currency.js';
 
 function setup(){
  const c=new DatabaseSync(':memory:');
@@ -111,4 +112,37 @@ test('currency menu shows EGP for USD and IQD customers, with the owner-set fixe
    globalThis.fetch=oldFetch;
    c.close();
  }
+});
+
+test('EGP default fixed exchange rate displays on homepage, products and wallet without an explicit setting',async()=>{
+ const {c,db}=setup();
+ const savedFetch=globalThis.fetch, messages=[];
+ globalThis.fetch=async(_url,opts)=>{
+  const payload=JSON.parse(opts.body); messages.push(payload);
+  return new Response(JSON.stringify({ok:true,result:{message_id:201}}),{status:200});
+ };
+ try{
+  c.prepare("INSERT INTO users(tg_id,first_name,currency_preference) VALUES(701,'Egypt','USD')").run();
+  c.prepare('INSERT INTO user_egp_display(user_tg_id) VALUES(701)').run();
+  c.prepare("INSERT INTO bot_settings(key,value) VALUES('usd_rate_iqd','1520')").run();
+  c.prepare("INSERT INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key) VALUES(701,152000,'topup','egp-default-test')").run();
+  c.prepare("INSERT INTO products(category_id,title,price_stars,stock,active,featured,price_iqd) VALUES(1,'EGP Regression',1,1,1,1,152000)").run();
+  assert.equal(c.prepare("SELECT value FROM bot_settings WHERE key='egp_rate_per_usd'").get(),undefined);
+  assert.equal(rateFromVisual({usd_rate_iqd:'1520'}),5424);
+  assert.equal((await walletSummary(db,701)).shown,'5,424.00 ج.م');
+  const env={TELEGRAM_BOT_TOKEN:'TEST',STORE_NAME:'My Store',ADMIN_ID:'999'};
+  await home(db,env,701);
+  assert.match(messages.at(-1).text,/5,424\.00 ج\.م/);
+  assert.ok(messages.at(-1).reply_markup.inline_keyboard.flat().some(b=>b.text?.includes('5,424.00 ج.م')));
+  await products(db,env,701);
+  assert.ok(messages.at(-1).reply_markup.inline_keyboard.flat().some(b=>b.text?.includes('5,424.00 ج.م')));
+  await wallet(db,env,701);
+  assert.match(messages.at(-1).text,/5,424\.00 ج\.م/);
+  assert.equal(c.prepare('SELECT wallet_balance_iqd n FROM users WHERE tg_id=701').get().n,152000);
+ }finally{globalThis.fetch=savedFetch;c.close()}
+});
+test('EGP explicit owner rate overrides fallback and invalid saved rate does not silently change to a fabricated price',()=>{
+ assert.equal(rateFromVisual({egp_rate_per_usd:'53.90'}),5390);
+ assert.equal(rateFromVisual({egp_rate_per_usd:'invalid'}),null);
+ assert.equal(rateFromVisual({}),5424);
 });
