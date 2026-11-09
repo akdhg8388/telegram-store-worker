@@ -12,7 +12,19 @@ export async function ensureUser(db, u) {
     ON CONFLICT(tg_id) DO UPDATE SET first_name=excluded.first_name, username=excluded.username, updated_at=CURRENT_TIMESTAMP`)
     .bind(u.id, String(u.first_name ?? '').slice(0,150), u.username ? String(u.username).slice(0,120) : null).run();
 }
-export async function getUser(db, userId) { return db.prepare('SELECT * FROM users WHERE tg_id=?').bind(userId).first(); }
+export async function getUser(db, userId) {
+  // Single indexed query (no extra round trip), but old tests without the
+  // optional migration can still inspect existing users.
+  try{
+    const row=await db.prepare("SELECT u.*, CASE WHEN "+
+      "EXISTS(SELECT 1 FROM user_egp_display WHERE user_tg_id=u.tg_id AND enabled=1) THEN 'EGP' "+
+      "ELSE u.currency_preference END AS selected_currency FROM users u WHERE u.tg_id=?").bind(userId).first();
+    return row?{...row,currency_preference:row.selected_currency||row.currency_preference}:null;
+  }catch(error){
+    if(!/no such table|no such column/i.test(String(error)))throw error;
+    return db.prepare('SELECT * FROM users WHERE tg_id=?').bind(userId).first();
+  }
+}
 export async function setSession(db, uid, action, payload={}) {
   return db.prepare(`INSERT INTO user_sessions(user_tg_id,action,payload) VALUES (?,?,?)
     ON CONFLICT(user_tg_id) DO UPDATE SET action=excluded.action,payload=excluded.payload,updated_at=CURRENT_TIMESTAMP`)

@@ -10,6 +10,7 @@ import {SETTING_FIELDS,getSetting,validateSetting,updateSetting} from './setting
 import {DEFAULT_TERMS} from './terms.js';
 import {boldEntities} from './v25-format.js';
 import {usdRate,receiverFor} from './wallet.js';
+import {parseEgpPerUsdMinor} from './display-currency.js';
 import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,preserveCustomEmojiInTemplate} from './presentation.js';
 import {home as customerHomePreview} from './ui.js';
 import {warrantyLine} from './warranty.js';
@@ -35,7 +36,7 @@ export function adminRoute(data){
   if(/^admin_pay_(?:quote:\w+|quote_toggle:\w+|quote_currency:\w+:(?:IQD|USD)|quote_mode:\w+:(?:none|fixed|percent)|quote_edit:\w+)$/.test(data))return true;
   if(/^admin_home_button_color:[a-z_]+(?::(?:default|primary|success|danger))?$/.test(data)
     || /^admin_pay_(?:edit:\w+:icon|icon_delete:\w+)$/.test(data))return true;
-  return /^(?:admin_terms|admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_discounts:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z0-9_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
+  return /^(?:admin_terms|admin_bot_intro|admin_bot_photo_edit|admin_bot_photo_remove|admin_counter|admin_counter_edit|admin_counter_reset|admin_toggle_support_direct|admin_support_contact|admin_visuals|admin_home_buttons(?::\d+)?|admin_home_button:[a-z_]+|admin_home_button_reset:[a-z_]+|admin_home_button_toggle:[a-z_]+|admin_home_button_color:[a-z_]+:(?:default|primary|success|danger)|admin_maintenance|admin_maintenance_toggle|admin_home_reset_all|admin_home_reset_all_confirm|admin_product_icons|admin_product_icon:\d+|admin_product_discounts:\d+|admin_product_warranty:\d+|admin_product_warranty_set:\d+:(?:yes|no|hidden)|admin_visual_preview|admin_visual_reset|admin_visual_reset_confirm|admin_topup_setup|admin_egp|admin_egp_toggle|admin_pay_add|admin_pay:\w+|admin_pay_edit:\w+:(?:ar|en|receiver|receiver_en|photo)|admin_pay_toggle:\w+:(?:enabled|visible)|admin_pay_photo_delete:\w+|admin_rate_1520|admin_stats|admin_settings(?::\d+)?|admin_setting:[a-z_]+|admin_toggle_store|admin_toggle_topups|admin_products(?::\d+)?|admin_product:\d+|admin_product_field:\d+:[a-z0-9_]+|admin_product_photo:\d+|admin_product_photo_delete:\d+|admin_product_code:\d+|admin_product_mode:\d+:(?:shared|unique|disabled)|admin_product_toggle:\d+:[a-z_]+|admin_product_categories:\d+|admin_product_move:\d+:\d+|admin_manage_categories|admin_category:\d+|admin_category_field:\d+:[a-z_]+|admin_category_toggle:\d+|admin_user_toggle:\d+|admin_find_user|admin_help)$/.test(data);
 }
 
 async function homeButtonList(db,env,uid,page=0,messageId=null){
@@ -108,7 +109,7 @@ async function settingDetail(db,env,uid,key,messageId=null){
   const def=SETTING_FIELDS[key];if(!def)return reply('الإعداد غير معروف.');
   const fallback=key==='home_template'?DEFAULT_HOME_TEMPLATE:key==='home_template_en'?DEFAULT_HOME_TEMPLATE_EN:key==='store_name'?env.STORE_NAME:key==='news_url'?env.NEWS_URL:key==='support_url'?env.SUPPORT_URL:key==='store_enabled'?'true':key==='manual_topups_enabled'?env.ENABLE_MANUAL_TOPUPS||'false':'';
   const value=await getSetting(db,key,fallback||'');
-  const rows=def.toggle?[[button(value==='false'?(key==='manual_topups_enabled'?'✅ تشغيل الشحن':key==='support_direct_enabled'?'✅ إظهار زر المسؤول':'✅ تشغيل استقبال الطلبات'):(key==='manual_topups_enabled'?'⏸️ إيقاف الشحن':key==='support_direct_enabled'?'🙈 إخفاء زر المسؤول':'⏸️ إيقاف الطلبات الجديدة'),key==='manual_topups_enabled'?'admin_toggle_topups':key==='support_direct_enabled'?'admin_toggle_support_direct':'admin_toggle_store',value==='false'?'success':'danger')]]:[[button('✏️ تعديل','admin_setting_edit:'+key)]];
+  const rows=def.toggle?[[button(value==='false'?(key==='egp_display_enabled'?'✅ تشغيل الجنيه المصري':key==='manual_topups_enabled'?'✅ تشغيل الشحن':key==='support_direct_enabled'?'✅ إظهار زر المسؤول':'✅ تشغيل استقبال الطلبات'):(key==='egp_display_enabled'?'⏸️ إخفاء الجنيه المصري':key==='manual_topups_enabled'?'⏸️ إيقاف الشحن':key==='support_direct_enabled'?'🙈 إخفاء زر المسؤول':'⏸️ إيقاف الطلبات الجديدة'),key==='egp_display_enabled'?'admin_egp_toggle':key==='manual_topups_enabled'?'admin_toggle_topups':key==='support_direct_enabled'?'admin_toggle_support_direct':'admin_toggle_store',value==='false'?'success':'danger')]]:[[button('✏️ تعديل','admin_setting_edit:'+key)]];
   if(key==='support_direct_enabled')rows.push([button('👤 إعداد حساب المسؤول','admin_setting:support_direct_username','primary')]);
   if(key==='home_template')rows.push([button('↩️ إعادة رسالة الترحيب الافتراضية','admin_visual_reset','danger')]);
   if(def.botProfile)rows.push([button('🖼️ تعريف البوت','admin_bot_intro','primary')]);
@@ -249,6 +250,7 @@ async function topupSetup(db,env,uid,messageId=null){
     `${enabled?'✅':'⏳'} تفعيل استقبال الطلبات`;
   const rows=[
     [button('💱 تعديل سعر الصرف','admin_setting_edit:usd_rate_iqd','primary')],
+    [button('🇪🇬 إدارة الجنيه المصري','admin_egp','success')],
     ...(!rate?[[button('✅ اعتماد 1 دولار = 1,520 د.ع','admin_rate_1520','success')]]:[]),
     ...methods.map(m=>[paymentButton(m,'ar',`admin_pay:${m.method_key}`)]),
     [button('➕ إضافة وسيلة دفع جديدة','admin_pay_add','success')],
@@ -540,6 +542,31 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await updateSetting(db,'usd_rate_iqd','1520',uid);
     await audit(db,uid,'set_usd_rate_1520','setting',0);
     await topupSetup(db,env,uid,messageId);
+  }
+  else if(data==='admin_egp'){
+    const [raw,enabled]=await Promise.all([getSetting(db,'egp_rate_per_usd','54.24'),getSetting(db,'egp_display_enabled','true')]);
+    const valid=parseEgpPerUsdMinor(raw);
+    await sendOrEditText(env,uid,'🇪🇬 إدارة عملة الجنيه المصري\n\n💱 السعر الثابت: 1 USD = '+
+      (valid?raw+' ج.م':'لم يحدد بعد')+'\n👁️ ظهور العملة: '+(enabled==='true'?'✅ مفعّل':'⏸️ معطّل')+
+      '\n\nتغيير السعر يؤثر على العرض المستقبلي فقط، وليس على أرصدة المحفظة أو مبالغ التحويل المحفوظة.',
+      keyboard([button('✏️ تعديل السعر الثابت','admin_setting_edit:egp_rate_per_usd','primary')],
+        [button(enabled==='true'?'⏸️ إخفاء الجنيه المصري':'✅ تفعيل الجنيه المصري','admin_egp_toggle',enabled==='true'?'danger':'success')],
+        [button('⚙️ إعدادات الشحن','admin_topup_setup','primary')],adminBack),messageId);
+  }
+  else if(data==='admin_egp_toggle'){
+    const raw=await getSetting(db,'egp_rate_per_usd','54.24');
+    if(!parseEgpPerUsdMinor(raw))return sendText(env,uid,'⚠️ حدّد سعر الجنيه المصري أولاً.');
+    const current=await getSetting(db,'egp_display_enabled','true');
+    const next=current==='true'?'false':'true';
+    // One owner-only atomic toggle changes only the display overlay, never
+    // ledger balances, saved preferred USD/IQD values, or payment totals.
+    await db.batch([
+      db.prepare("INSERT INTO bot_settings(key,value,updated_by) VALUES('egp_display_enabled',?,?) "+
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP").bind(next,uid),
+      db.prepare('UPDATE user_egp_display SET enabled=?').bind(next==='true'?1:0)
+    ]);
+    await audit(db,uid,'toggle_egp_display','setting',0);
+    await handleAdminCallback(db,env,uid,'admin_egp',messageId);
   }
   else if(data==='admin_stats')await stats(db,env,uid,messageId);
   else if(data.startsWith('admin_settings'))await settings(db,env,uid,Math.min(20,positiveInt(data.split(':')[1])??0),messageId);

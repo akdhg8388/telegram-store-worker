@@ -1,6 +1,7 @@
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 import {getProduct,getUser,getSession,setSession,clearSession} from './database.js';
 import {usdRate,formatUSD} from './wallet.js';
+import {egpRate,formatPreferredIQD} from './display-currency.js';
 import {button,keyboard,formatIQD,short} from './common.js';
 import {sendText} from './telegram.js';
 import {trackPurchaseView} from './purchase-views.js';
@@ -16,8 +17,10 @@ export function quantityPricing(p,qty){
 export async function quantityPicker(db,env,uid,p){
  const available=await purchaseAvailability(db,p);
  if(!available.ready)return sendText(env,uid,'⛔ '+available.reason);
- const user=await getUser(db,uid),rate=user?.currency_preference==='USD'?await usdRate(db):null;
- const price=value=>rate?formatUSD(Math.round(value*100/rate)):formatIQD(value);
+ const user=await getUser(db,uid);
+ const rate=user?.currency_preference==='IQD'?null:await usdRate(db);
+ const egp=user?.currency_preference==='EGP'?await egpRate(db):null;
+ const price=value=>formatPreferredIQD(value,user?.currency_preference||'USD',rate,egp);
  const msg=await sendText(env,uid,'🛒 اختر الكمية\n\n📦 المنتج: '+short(p.title,110)+
    '\n💰 سعر الوحدة: '+price(p.price_iqd)+
    '\n📦 المخزون: '+(available.count??'غير محدود')+
@@ -42,7 +45,8 @@ export async function bulkConfirm(db,env,uid,p,qty){
  if(available.count!==null&&available.count!==undefined&&qty>available.count)
    return sendText(env,uid,'❌ المخزون غير كافٍ. المتوفر '+available.count+' فقط.',keyboard([button('🛒 تغيير الكمية','buy:'+p.id)]));
  const [user,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
- const price=value=>user?.currency_preference==='USD'&&rate?formatUSD(Math.round(value*100/rate)):formatIQD(value);
+ const egp=user?.currency_preference==='EGP'?await egpRate(db):null;
+ const price=value=>formatPreferredIQD(value,user?.currency_preference||'USD',rate,egp);
  const balance=Number(user?.wallet_balance_iqd||0);
  if(balance<q.total)return sendText(env,uid,'💳 رصيدك غير كافٍ.\n💵 المطلوب: '+price(q.total)+'\n👛 الرصيد: '+price(balance)+
    '\n📉 المتبقي: '+price(q.total-balance),keyboard(

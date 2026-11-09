@@ -11,7 +11,8 @@ import {getSetting,storeAcceptsOrders} from './settings.js';
 import {DEFAULT_HOME_TEMPLATE,DEFAULT_HOME_TEMPLATE_EN,renderHomeTemplate,decimalMoney,decoratedMessage,decoratedHome,decorateProductText} from './presentation.js';
 import {loadVisualSettings,homeActionButton,homeUrlButton,isHomeButtonVisible,withButtonIcon,emojiId} from './home-buttons.js';
 import {languageOf,choice,translateUi} from './i18n.js';
-import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage,validRate} from './wallet.js';
+import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY_METHODS,quoteFromUSD,topupStatus,topupStatusMessage,validRate,displayIqd,egpTopupQuote} from './wallet.js';
+import {egpRate,rateFromVisual,formatEgpMinor,formatPreferredIQD,egpDisplayEnabled} from './display-currency.js';
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 import {sendPhotoCard,cardEntities} from './product-card.js';
 import {isMaintenanceButtonEnabled} from './maintenance.js';
@@ -35,8 +36,7 @@ export async function home(db,env,uid,messageId=null) {
   ]);
   const featured=featuredRow.results??[];
   const rate=validRate(visual.usd_rate_iqd);
-  const display=amount=>(user?.currency_preference||'USD')==='USD'
-    ?(rate?formatUSD(Math.round(Number(amount)*100/rate)):'$—'):formatIQD(amount);
+  const display=amount=>displayIqd(amount,user,rate,rateFromVisual(visual));
   const rows=[];
   const homeButton=(id,style='primary')=>isHomeButtonVisible(visual,id)?homeActionButton(visual,id,lang,style):null;
   for(const p of featured)rows.push([withButtonIcon(button(`🌟 ${short(lang==='en'&&p.title_en||p.title,25)} — ${display(p.price_iqd)}`,`product:${p.id}`,'success'),p.custom_emoji_id||visual.product_custom_emoji_id)]);
@@ -62,7 +62,7 @@ export async function home(db,env,uid,messageId=null) {
   const values={
     store:short(visual.store_name||env.STORE_NAME||'My Store',80),name:short(user?.first_name||choice(env,'مستخدم','User'),120),
     id:String(uid),users:shownUsers.toLocaleString('en-US'),
-    balance:(user?.currency_preference||'USD')==='USD'?(rate?'$'+decimalMoney(balance/rate):'$—'):'IQD '+Number(balance).toLocaleString('en-US'),
+    balance:user?.currency_preference==='EGP'?display(balance):user?.currency_preference==='USD'?(rate?'$'+decimalMoney(balance/rate):'$—'):'IQD '+Number(balance).toLocaleString('en-US'),
     balance_iqd:decimalMoney(balance),balance_usd:rate?decimalMoney(balance/rate):choice(env,'غير محدد','Not configured'),
     instructions:short(visual.storefront_instructions||'',1200)
   };
@@ -88,11 +88,11 @@ export async function products(db,env,uid,page=0,categoryId=null,query=null,feat
   const rows=[];
   // Read currency/rate once per page; independent inventory checks run concurrently.
   const currency=await getUser(db,uid);
-  const rate=(currency?.currency_preference||'USD')==='USD'?await usdRate(db):null;
   const [statuses,visual]=await Promise.all([Promise.all(records.map(p=>purchaseAvailability(db,p))),loadVisualSettings(db)]);
+  const rate=validRate(visual.usd_rate_iqd);
   records.forEach((p,index)=>{
     const available=statuses[index];
-    const value=p.price_iqd?((currency?.currency_preference||'USD')==='USD'?(rate?formatUSD(Math.round(p.price_iqd*100/rate)):'$—'):formatIQD(p.price_iqd)):choice(env,'غير مسعّر','Not priced');
+    const value=p.price_iqd?displayIqd(p.price_iqd,currency,rate,rateFromVisual(visual)):choice(env,'غير مسعّر','Not priced');
     rows.push([withButtonIcon(button(`${available.ready?'🟢':'🔴'} ${short(languageOf(env)==='en'&&p.title_en||p.title,29)} — ${value} • ${available.ready?(available.count??choice(env,'متوفر','Available')):choice(env,'غير متاح','Unavailable')}`,`product:${p.id}`,available.ready?'success':'danger'),p.custom_emoji_id||visual.product_custom_emoji_id)]);
   });
   if(!featuredOnly && !query){
@@ -119,7 +119,7 @@ export async function productView(db,env,uid,id,messageId=null){
   const icon=p.custom_emoji_id||visual.product_custom_emoji_id;
   const stockText=status.ready?`🟢 ${choice(env,'متوفر • المخزون الجاهز:','Available • Ready stock:')} ${status.count??choice(env,'متاح','Available')}`:`🔴 ${choice(env,'غير متوفر •','Unavailable •')} ${languageOf(env)==='en'?translateUi(status.reason,'en'):status.reason}`;
   const rate=validRate(visual.usd_rate_iqd);
-  const shown=p.price_iqd?((user?.currency_preference||'USD')==='USD'?(rate?formatUSD(Math.round(p.price_iqd*100/rate)):'$—'):formatIQD(p.price_iqd)):choice(env,'لم يحدد','Not specified');
+  const shown=p.price_iqd?displayIqd(p.price_iqd,user,rate,rateFromVisual(visual)):choice(env,'لم يحدد','Not specified');
   const en=languageOf(env)==='en';
   const title=short(en&&p.title_en||p.title,150);
   const how=short(en&&p.usage_instructions_en||p.usage_instructions||choice(env,'لم تُضف تعليمات بعد.','No usage instructions provided.'),1800);
@@ -158,15 +158,21 @@ export async function walletSummary(db,uid){
   const currency=u?.currency_preference||'USD';
   const rate=await usdRate(db);
   const walletIqd=Number(u?.wallet_balance_iqd||0);
-  const shown=currency==='USD' ? (rate ? formatUSD(Math.round(walletIqd*100/rate)) : 'الدولار غير مهيأ بعد') : formatIQD(walletIqd);
-  return {currency,rate,walletIqd,shown};
+  const egpRateMinor=currency==='EGP'?await egpRate(db):null;
+  const shown=displayIqd(walletIqd,u,rate,egpRateMinor);
+  return {currency,rate,walletIqd,shown,egpRateMinor};
 }
 export async function currencyMenu(db,env,uid,messageId=null){
-  const {currency,rate}=await walletSummary(db,uid);
-  const note=rate?`💱 السعر المعتمد من الإدارة: 1 USD = ${formatIQD(rate)}`:'⚠️ سعر الصرف لم يُحدد بعد من الإدارة؛ لن تظهر أرقام تحويل تخمينية.';
-  return sendOrEditText(env,uid,`💱 إعداد عملة العرض\n\n✅ العملة المحددة: ${currency==='USD'?'🇺🇸 الدولار الأمريكي (USD)':'🇮🇶 الدينار العراقي (IQD)'}\n${note}\n\nاختر عملة واحدة. يتغير عرض الأسعار والمحفظة فقط، ولا يتغير الرصيد الحقيقي.`,keyboard(
+  const {currency,rate,egpRateMinor}=await walletSummary(db,uid);
+  const enabled=await getSetting(db,'egp_display_enabled','true')==='true';
+  const note=rate?`💱 السعر المعتمد من الإدارة: 1 USD = ${formatIQD(rate)}`:'⚠️ سعر صرف الدولار غير مهيأ بعد.';
+  const egpNote=enabled&&egpRateMinor?'\n🇪🇬 السعر الثابت: 1 USD = '+formatEgpMinor(egpRateMinor):'';
+  const selected=currency==='EGP'?'🇪🇬 الجنيه المصري (EGP)':currency==='USD'?'🇺🇸 الدولار الأمريكي (USD)':'🇮🇶 الدينار العراقي (IQD)';
+  return sendOrEditText(env,uid,`💱 إعداد عملة العرض\n\n✅ العملة المحددة: ${selected}\n${note}${egpNote}\n\nاختر عملة واحدة للمتجر والمحفظة والشحن. لا تتغير الأرصدة الحقيقية.`,keyboard(
     [button((currency==='USD'?'✅ ':'')+'🇺🇸 الدولار الأمريكي USD','currency_set:USD',currency==='USD'?'success':'primary')],
-    [button((currency==='IQD'?'✅ ':'')+'🇮🇶 الدينار العراقي IQD','currency_set:IQD',currency==='IQD'?'success':'primary')],backRow()),messageId);
+    [button((currency==='IQD'?'✅ ':'')+'🇮🇶 الدينار العراقي IQD','currency_set:IQD',currency==='IQD'?'success':'primary')],
+    ...(enabled&&egpRateMinor?[[button((currency==='EGP'?'✅ ':'')+'🇪🇬 الجنيه المصري EGP','currency_set:EGP',currency==='EGP'?'success':'primary')]]:[]),
+    backRow()),messageId);
 }
 export async function profile(db,env,uid,messageId=null){
   const u=await getUser(db,uid);
@@ -199,7 +205,7 @@ export async function wallet(db,env,uid,messageId=null){
     '',
     labels[0]+' '+amount,
     labels[1]+' '+w.currency,
-    labels[2]+' '+(w.rate?'1 USD = '+displayIqd(w.rate):choice(env,'⚠️ لم تحدد الإدارة سعر الصرف بعد.','⚠️ The exchange rate has not yet been configured.')),
+    labels[2]+' '+(w.currency==='EGP'&&w.egpRateMinor?'1 USD = '+formatEgpMinor(w.egpRateMinor):w.rate?'1 USD = '+displayIqd(w.rate):choice(env,'⚠️ لم تحدد الإدارة سعر الصرف بعد.','⚠️ The exchange rate has not yet been configured.')),
     '',
     enabled?choice(env,'✅ يمكنك إرسال طلب شحن لمراجعته من الإدارة.','✅ You can submit a top-up request for review by the support team.'):
       choice(env,'⏳ شحن المحفظة لم يُفعّل من الإدارة بعد.','⏳ Wallet top-ups are currently unavailable.'),
@@ -215,7 +221,7 @@ export async function wallet(db,env,uid,messageId=null){
 export async function transactions(db,env,uid,messageId=null){
   const entries=await ledger(db,uid);
   const w=await walletSummary(db,uid);
-  const text=entries.length?entries.map(e=>`#${e.id} | ${e.delta_iqd>0?'+':''}${formatIQD(e.delta_iqd)}${w.currency==='USD' && w.rate?' (≈ '+formatUSD(Math.round(e.delta_iqd*100/w.rate))+' بسعر اليوم المحدد من الإدارة)':''} | ${e.kind} | ${e.created_at}`).join('\n'):'لا توجد عمليات داخلية مسجلة حتى الآن.';
+  const text=entries.length?entries.map(e=>`#${e.id} | ${e.delta_iqd>0?'+':''}${formatPreferredIQD(Math.abs(e.delta_iqd),w.currency,w.rate,w.egpRateMinor)} | ${e.kind} | ${e.created_at}`).join('\n'):'لا توجد عمليات داخلية مسجلة حتى الآن.';
   return sendOrEditText(env,uid,`📜 سجل المحفظة\n\n${text}`,keyboard(backRow()),messageId);
 }
 export async function orders(db,env,uid,messageId=null){
@@ -223,7 +229,8 @@ export async function orders(db,env,uid,messageId=null){
   const txt=items.length?items.map(o=>`#${o.id} | ${short(o.title,36)}\n${orderNames[o.status]||o.status} (طلب بالنظام السابق)`).join('\n\n'):'لا توجد طلبات بالنظام السابق.';
   const rows=[[button('📦 مشترياتي وتسليماتي','wallet_purchases','success')]];
   const topups=(await db.prepare(`SELECT id,method,amount_iqd,requested_currency,requested_amount_minor,status,created_at FROM topup_requests WHERE user_tg_id=? AND (status='pending' OR created_at>=datetime('now','-30 days')) ORDER BY id DESC LIMIT 10`).bind(uid).all()).results??[];
-  const topupText=topups.length?topups.map(t=>`#${t.id} • ${formatQuote({currency:t.requested_currency,requestedMinor:t.requested_amount_minor,amountIqd:t.amount_iqd})} • ${topupStatus(t.status)}`).join('\n'):'لا توجد طلبات شحن.';
+  const w=await walletSummary(db,uid);
+  const topupText=topups.length?topups.map(t=>`#${t.id} • ${formatPreferredIQD(t.amount_iqd,w.currency,w.rate,w.egpRateMinor)} • ${topupStatus(t.status)}`).join('\n'):'لا توجد طلبات شحن.';
   rows.push(...topups.slice(0,8).map(t=>[button(`💳 متابعة شحن #${t.id}`,`topup_status:${t.id}`,'primary')]));
    rows.push(backRow());
   const totalWallet=(await db.prepare(`SELECT COUNT(*) AS n FROM wallet_purchases WHERE user_tg_id=? AND created_at>=datetime('now','-30 days')`).bind(uid).first())?.n||0;
@@ -234,26 +241,28 @@ export async function orders(db,env,uid,messageId=null){
 export async function favorites(db,env,uid,messageId=null){
   const items=(await db.prepare('SELECT p.id,p.title,p.price_iqd FROM favorites f JOIN products p ON p.id=f.product_id WHERE f.user_tg_id=? AND p.active=1 ORDER BY p.id DESC LIMIT 20').bind(uid).all()).results??[];
   const [user,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
+  const egpRateMinor=user?.currency_preference==='EGP'?await egpRate(db):null;
   const rows=[];for(const item of items){
-    const value=item.price_iqd?((user?.currency_preference||'USD')==='USD'?(rate?formatUSD(Math.round(item.price_iqd*100/rate)):'$—'):formatIQD(item.price_iqd)):'غير مسعر';
+    const value=item.price_iqd?displayIqd(item.price_iqd,user,rate,egpRateMinor):'غير مسعر';
     rows.push([button(`${short(item.title,35)} — ${value}`,`product:${item.id}`)]);
   }
   return sendOrEditText(env,uid,items.length?'💗 المفضلة — منتجاتك المحفوظة:':'💗 المفضلة\n\nليس لديك منتجات مفضلة.',keyboard(...rows,backRow()),messageId);
 }
 export async function topupPresets(db,env,uid,messageId=null){
   const w=await walletSummary(db,uid);
-  if(!w.rate)return transientText(env,uid,'⚠️ يجب على المدير تحديد سعر صرف الدولار بالدينار من لوحة الإعدادات قبل إنشاء طلبات الشحن.',keyboard([button('💳 محفظتي','wallet','primary')],backRow()),messageId);
+  if(!w.rate||w.currency==='EGP'&&!w.egpRateMinor)return transientText(env,uid,'⚠️ سعر الصرف غير مهيأ؛ يجب على المدير ضبط الدولار والجنيه المصري.',keyboard([button('💳 محفظتي','wallet','primary')],backRow()),messageId);
   const rows=[];
   for(let i=0;i<USD_PRESETS.length;i+=3){
     rows.push(USD_PRESETS.slice(i,i+3).map(usd=>{
-      const q=quoteFromUSD(usd,w.rate,w.currency);
-      return button(w.currency==='IQD'?formatIQD(q.amountIqd):`$${usd}`,`topup_preset:${usd}:${w.currency}`,'success');
+      const q=quoteFromUSD(usd,w.rate,w.currency==='EGP'?'IQD':w.currency);
+      const label=w.currency==='EGP'?formatEgpMinor(usd*w.egpRateMinor):w.currency==='IQD'?formatIQD(q.amountIqd):`$${usd}`;
+      return button(label,`topup_preset:${usd}:${w.currency}`,'success');
     }));
   }
   rows.push([button('✏️ أدخل مبلغاً مخصصاً','topup_custom','success')]);
   rows.push([button('💱 تغيير العملة','currency','primary')]);
   rows.push([button('↩️ رجوع','wallet','danger')]);
-  return transientText(env,uid,`💳 شحن المحفظة\n\n💰 الرصيد: ${w.shown}\nاختر المبلغ المطلوب (${w.currency}):\n\n💱 سعر الصرف المعتمد: 1 USD = ${formatIQD(w.rate)}\nسيظهر مبلغ التحويل النهائي قبل التأكيد.`,keyboard(...rows),messageId);
+  return transientText(env,uid,`💳 شحن المحفظة\n\n💰 الرصيد: ${w.shown}\nاختر المبلغ المطلوب (${w.currency}):\n\n💱 السعر الثابت: 1 USD = ${w.currency==='EGP'?formatEgpMinor(w.egpRateMinor):formatIQD(w.rate)}\nسيظهر مبلغ التحويل الفعلي بعملة وسيلة الدفع قبل التأكيد.`,keyboard(...rows),messageId);
 }
 export async function topupMethods(db,env,uid,quote,messageId=null){
  const [instructions,methods]=await Promise.all([getSetting(db,'topup_instructions',''),methodList(db,env,{activeOnly:true})]);
@@ -325,9 +334,9 @@ ${transferSummary(payload)}
     [button('❌ إلغاء','topup_cancel','danger')]),messageId);
 }
 export async function topupStatusView(db,env,uid,id,messageId=null){
-  const record=await db.prepare('SELECT * FROM topup_requests WHERE id=? AND user_tg_id=?').bind(id,uid).first();
+  const [record,w]=await Promise.all([db.prepare('SELECT * FROM topup_requests WHERE id=? AND user_tg_id=?').bind(id,uid).first(),walletSummary(db,uid)]);
   if(!record)return sendOrEditText(env,uid,'لا يوجد طلب شحن بهذا الرقم لحسابك.',keyboard([button('📦 طلباتي','orders','primary')],backRow()),messageId);
-  return sendOrEditText(env,uid,topupStatusMessage(record),keyboard(
+  return sendOrEditText(env,uid,topupStatusMessage(record,w.currency,w.rate,w.egpRateMinor),keyboard(
     [button('🔄 تحديث الحالة',`topup_status:${id}`,'primary')],
     [button('📦 طلباتي','orders','primary')],backRow()),messageId);
 }

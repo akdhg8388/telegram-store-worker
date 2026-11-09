@@ -2,6 +2,7 @@ import {languageOf,choice} from './i18n.js';
 import {button,keyboard,backRow,formatIQD,short} from './common.js';
 import {getUser,getProduct,getSession,setSession,clearSession} from './database.js';
 import {usdRate,formatUSD,baghdadDate} from './wallet.js';
+import {egpRate,formatPreferredIQD} from './display-currency.js';
 import {sendText,telegram} from './telegram.js';
 import {trackPurchaseView} from './purchase-views.js';
 import {warrantyLine} from './warranty.js';
@@ -26,18 +27,18 @@ export async function purchaseAvailability(db,p){
 }
 export async function priceDisplay(db,uid,price){
   const user=await getUser(db,uid);
-  if(user?.currency_preference==='USD'){
-    const rate=await usdRate(db);
-    if(rate)return formatUSD(Math.round(price*100/rate));
-  }
-  return formatIQD(price);
+  if(!user||user.currency_preference==='IQD')return formatIQD(price);
+  const rate=await usdRate(db);
+  const egp=user.currency_preference==='EGP'?await egpRate(db):null;
+  return formatPreferredIQD(price,user.currency_preference,rate,egp);
 }
 export async function beginPurchase(db,env,uid,p,nonceFactory=()=>crypto.randomUUID()){
   const status=await purchaseAvailability(db,p);
   if(!status.ready)return sendText(env,uid,'⛔ '+status.reason);
   const [u,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
   const amount=Number(p.price_iqd),balance=Number(u?.wallet_balance_iqd||0);
-  const price=value=>u?.currency_preference==='USD'&&rate?formatUSD(Math.round(value*100/rate)):formatIQD(value);
+  const egp=u?.currency_preference==='EGP'?await egpRate(db):null;
+  const price=value=>formatPreferredIQD(value,u?.currency_preference||'USD',rate,egp);
   const title=short(languageOf(env)==='en'&&p.title_en||p.title,100);
   const warranty=warrantyLine(p,languageOf(env));
   if(balance<amount)return sendText(env,uid,languageOf(env)==='en'
@@ -114,7 +115,8 @@ export async function showReceipt(db,env,uid,id){
     db.prepare("SELECT id FROM wallet_ledger WHERE source_key=? AND user_tg_id=? LIMIT 1")
       .bind('wallet_purchase:'+sale.id,uid).first()
   ]);
-  const format=value=>current?.currency_preference==='USD'&&rate?formatUSD(Math.round(Number(value)*100/rate)):formatIQD(value);
+  const egp=current?.currency_preference==='EGP'?await egpRate(db):null;
+  const format=value=>formatPreferredIQD(Number(value),current?.currency_preference||'USD',rate,egp);
   const english=languageOf(env)==='en';
   const name=short(english&&sale.current_title_en||sale.product_name,150);
   const details=short(english&&sale.current_description_en||sale.product_description||'—',650);

@@ -1,6 +1,7 @@
 import {formatIQD, short, moneyMethods} from './common.js';
 import {getSetting} from './settings.js';
 import {paymentMethod} from './payment-methods.js';
+import {formatEgpMinor,formatPreferredIQD,egpQuoteToIQD} from './display-currency.js';
 
 export const USD_PRESETS = Object.freeze([10,25,100,250,500,1000]);
 export const PAY_METHODS = Object.freeze(['zain_balance','superqi','binance']);
@@ -14,7 +15,20 @@ export function formatUSD(cents){
   return '$'+(cents/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 export function formatQuote(quote) {
+  if(quote?.displayCurrency==='EGP'||quote?.display_currency==='EGP'){
+    const minor=Number(quote.displayMinor??quote.display_amount_minor);
+    if(Number.isSafeInteger(minor)&&minor>=0)return formatEgpMinor(minor);
+  }
   return quote.currency==='USD' ? `${formatUSD(quote.requestedMinor)} ≈ ${formatIQD(quote.amountIqd)}` : formatIQD(quote.amountIqd);
+}
+export function displayIqd(amount,user,usdIqd,egpPerUsdMinor){
+ return formatPreferredIQD(Number(amount||0),user?.currency_preference||'USD',usdIqd,egpPerUsdMinor);
+}
+export function egpTopupQuote(minor,usdIqd,egpPerUsdMinor){
+ const amountIqd=egpQuoteToIQD(minor,usdIqd,egpPerUsdMinor);
+ if(amountIqd===null)return null;
+ return {currency:'IQD',requestedMinor:amountIqd,amountIqd,rate:usdIqd,
+   displayCurrency:'EGP',displayMinor:minor,egpRateMinor:egpPerUsdMinor};
 }
 export function validRate(raw){
   const v=Number(raw);
@@ -42,7 +56,7 @@ export function quoteMinor(currency,minor,rate){
 export function parseCustomMinor(input,currency){
   const value=String(input).trim().replace(/,/g,'');
   if(currency==='IQD')return /^\d{1,8}$/.test(value) ? Number(value):null;
-  if(!/^(?:\d{1,4})(?:\.\d{1,2})?$/.test(value))return null;
+  if(!new RegExp(currency==='EGP'?'^\\d{1,6}(?:\\.\\d{1,2})?$':'^\\d{1,4}(?:\\.\\d{1,2})?$').test(value))return null;
   const [whole,fraction='']=value.split('.');
   const minor=Number(whole)*100+Number(fraction.padEnd(2,'0'));
   return Number.isSafeInteger(minor)?minor:null;
@@ -57,8 +71,15 @@ export function baghdadDate(utcText,locale='ar'){
 export function topupStatus(status){return ({pending:'⏳ قيد المراجعة',approved:'✅ تمت الموافقة',rejected:'❌ مرفوض'})[status]||status;}
 export function quoteOfRecord(row){return {
   currency:row.requested_currency||'IQD',requestedMinor:row.requested_amount_minor||row.amount_iqd,
-  amountIqd:row.amount_iqd,rate:row.quoted_rate_iqd||null
+  amountIqd:row.amount_iqd,rate:row.quoted_rate_iqd||null,
+  displayCurrency:row.display_currency||null,displayMinor:row.display_amount_minor,
+  egpRateMinor:row.display_egp_per_usd_minor
 };}
-export function topupStatusMessage(row){
-  return `💳 طلب شحن #${row.id}\n\n💰 المطلوب: ${formatQuote(quoteOfRecord(row))}${row.credited_amount_iqd!=null?'\n✅ المضاف فعلياً: '+formatIQD(row.credited_amount_iqd):''}\n💸 الطريقة: ${moneyMethods[row.method]||row.method}\n📌 الحالة: ${topupStatus(row.status)}\n🗓️ وقت الطلب: ${baghdadDate(row.created_at)}${row.decided_at?'\n🕒 وقت القرار: '+baghdadDate(row.decided_at):''}`;
+export function topupStatusMessage(row,currency=null,usdIqd=null,egpRateMinor=null){
+  const preferred=currency==='EGP'&&egpRateMinor&&usdIqd
+    ?value=>formatPreferredIQD(value,'EGP',usdIqd,egpRateMinor)
+    :currency==='USD'&&usdIqd?value=>formatPreferredIQD(value,'USD',usdIqd,null)
+    :currency==='IQD'?formatIQD:null;
+  const requested=preferred?preferred(row.amount_iqd):formatQuote(quoteOfRecord(row));
+  return `💳 طلب شحن #${row.id}\n\n💰 المطلوب: ${requested}${row.credited_amount_iqd!=null?'\n✅ المضاف فعلياً: '+(preferred?preferred(row.credited_amount_iqd):formatIQD(row.credited_amount_iqd)):''}\n💸 الطريقة: ${moneyMethods[row.method]||row.method}\n📌 الحالة: ${topupStatus(row.status)}\n🗓️ وقت الطلب: ${baghdadDate(row.created_at)}${row.decided_at?'\n🕒 وقت القرار: '+baghdadDate(row.decided_at):''}`;
 }

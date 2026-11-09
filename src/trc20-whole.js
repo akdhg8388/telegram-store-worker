@@ -25,5 +25,8 @@ export async function submitWholeTrc20ForReview(db,uid,id,proof,env={}){
  ])}catch(e){if(/UNIQUE|constraint/i.test(String(e)))return {status:'duplicate'};throw e}
  if(rows[0]?.meta?.changes!==1||rows[1]?.meta?.changes!==1)return {status:'duplicate'};
  const topup=await db.prepare('SELECT id FROM topup_requests WHERE submission_key=? AND user_tg_id=?').bind(id,uid).first();
+ if(intent.display_currency==='EGP'&&Number.isSafeInteger(intent.display_amount_minor)&&topup?.id)
+   await db.prepare("UPDATE topup_requests SET display_currency='EGP',display_amount_minor=?,display_egp_per_usd_minor=? WHERE id=? AND user_tg_id=? AND status='pending'")
+     .bind(intent.display_amount_minor,intent.display_egp_per_usd_minor,topup.id,uid).run();
  return {status:'pending_review',topupId:topup.id,creditedIqd:credit,amountMicro:micro};
 }
