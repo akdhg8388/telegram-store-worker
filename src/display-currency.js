@@ -82,5 +82,6 @@ export function formatStoredQuote(row,viewCurrency='',usdIqd=null,egpPerUsdMinor
  if(currency==='EGP'&&row.displayMinor!=null)
    return formatEgpMinor(Number(row.displayMinor));
  return formatPreferredIQD(Number(row.amountIqd??row.amount_iqd??0),currency,
-   Number(usdIqd??row.rate??row.quoted_rate_iqd),Number(egpPerUsdMinor??row.egpRateMinor??row.display_egp_per_usd_minor));
+   Number(usdIqd??row.rate??row.quoted_rate_iqd),
+   Number(egpPerUsdMinor??(currency==='LYD'?(row.lydRateMilli??row.display_lyd_per_usd_milli):(row.egpRateMinor??row.display_egp_per_usd_minor))));
 }

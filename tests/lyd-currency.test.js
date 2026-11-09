@@ -7,7 +7,7 @@ import {
  lydRateFromVisual,formatPreferredIQD,rateFromVisual,egpRate
 } from '../src/display-currency.js';
 import {
- formatQuote,quoteFromUSD,lydTopupQuote,parseCustomMinor,topupStatusMessage,usdRate
+ formatQuote,quoteFromUSD,lydTopupQuote,parseCustomMinor,topupStatusMessage,quoteOfRecord,usdRate
 } from '../src/wallet.js';
 import {getUser} from '../src/database.js';
 import {validateSetting,updateSetting} from '../src/settings.js';
@@ -135,6 +135,7 @@ test('Libyan topups are display-only: existing IQD payment rails, original amoun
  assert.match(topupStatusMessage(request,'LYD',1520,6430),/643\.000 د\.ل/);
  assert.match(topupStatusMessage(request,'LYD',1520,6430),/321\.500 د\.ل/);
  assert.equal(formatQuote({...request,displayCurrency:'LYD'}),'643.000 د.ل');
+ assert.equal(formatQuote(quoteOfRecord(request)),'643.000 د.ل');
  assert.equal(quoteFromUSD(100,1520,'IQD').amountIqd,152000);
 });
 
