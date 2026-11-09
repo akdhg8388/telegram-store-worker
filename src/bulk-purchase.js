@@ -1,7 +1,7 @@
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 import {getProduct,getUser,getSession,setSession,clearSession} from './database.js';
 import {usdRate,formatUSD} from './wallet.js';
-import {egpRate,formatPreferredIQD} from './display-currency.js';
+import {egpRate,lydRate,formatPreferredIQD} from './display-currency.js';
 import {button,keyboard,formatIQD,short} from './common.js';
 import {sendText} from './telegram.js';
 import {trackPurchaseView} from './purchase-views.js';
@@ -19,7 +19,7 @@ export async function quantityPicker(db,env,uid,p){
  if(!available.ready)return sendText(env,uid,'⛔ '+available.reason);
  const user=await getUser(db,uid);
  const rate=user?.currency_preference==='IQD'?null:await usdRate(db);
- const egp=user?.currency_preference==='EGP'?await egpRate(db):null;
+ const egp=user?.currency_preference==='EGP'?await egpRate(db):user?.currency_preference==='LYD'?await lydRate(db):null;
  const price=value=>formatPreferredIQD(value,user?.currency_preference||'USD',rate,egp);
  const msg=await sendText(env,uid,'🛒 اختر الكمية\n\n📦 المنتج: '+short(p.title,110)+
    '\n💰 سعر الوحدة: '+price(p.price_iqd)+
@@ -45,7 +45,7 @@ export async function bulkConfirm(db,env,uid,p,qty){
  if(available.count!==null&&available.count!==undefined&&qty>available.count)
    return sendText(env,uid,'❌ المخزون غير كافٍ. المتوفر '+available.count+' فقط.',keyboard([button('🛒 تغيير الكمية','buy:'+p.id)]));
  const [user,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
- const egp=user?.currency_preference==='EGP'?await egpRate(db):null;
+ const egp=user?.currency_preference==='EGP'?await egpRate(db):user?.currency_preference==='LYD'?await lydRate(db):null;
  const price=value=>formatPreferredIQD(value,user?.currency_preference||'USD',rate,egp);
  const balance=Number(user?.wallet_balance_iqd||0);
  if(balance<q.total)return sendText(env,uid,'💳 رصيدك غير كافٍ.\n💵 المطلوب: '+price(q.total)+'\n👛 الرصيد: '+price(balance)+
