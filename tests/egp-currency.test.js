@@ -9,6 +9,7 @@ import {quoteFromUSD,egpTopupQuote,formatQuote,parseCustomMinor,topupStatusMessa
 import {getUser} from '../src/database.js';
 import {validateSetting,updateSetting} from '../src/settings.js';
 import {paymentQuote} from '../src/payment-quote.js';
+import {currencyMenu} from '../src/ui.js';
 
 function setup(){
  const c=new DatabaseSync(':memory:');
@@ -75,4 +76,39 @@ test('Egyptian EGP input keeps payment rails in real USD/IQD, no EGP stored in l
  assert.ok(shown.includes('5,424.00 ج.م'));
  assert.ok(shown.includes('2,712.00 ج.م'));
  assert.ok(!shown.includes('152,000 د.ع'));
+});
+
+test('currency menu shows EGP for USD and IQD customers, with the owner-set fixed rate',async()=>{
+ const {c,db}=setup();
+ const oldFetch=globalThis.fetch;
+ const sent=[];
+ globalThis.fetch=async(_url,options)=>{
+   sent.push(JSON.parse(options.body));
+   return new Response(JSON.stringify({ok:true,result:{message_id:1001}}),{status:200});
+ };
+ try{
+   c.prepare("INSERT INTO users(tg_id,first_name,currency_preference) VALUES (601,'USD User','USD'),(602,'IQD User','IQD')").run();
+   c.prepare("INSERT INTO bot_settings(key,value) VALUES('usd_rate_iqd','1520')").run();
+   const env={TELEGRAM_BOT_TOKEN:'TEST',ADMIN_ID:'999'};
+   for(const uid of [601,602]){
+     await currencyMenu(db,env,uid);
+     const message=sent.at(-1);
+     const callbacks=message.reply_markup.inline_keyboard.flat().map(b=>b.callback_data);
+     assert.ok(callbacks.includes('currency_set:USD'));
+     assert.ok(callbacks.includes('currency_set:IQD'));
+     assert.ok(callbacks.includes('currency_set:EGP'),'EGP hidden for current '+uid);
+     assert.match(message.text,/54\.24/);
+   }
+   await updateSetting(db,'egp_rate_per_usd','53.90',999);
+   await currencyMenu(db,env,601);
+   assert.match(sent.at(-1).text,/53\.90/);
+   assert.ok(sent.at(-1).reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='currency_set:EGP'));
+   await updateSetting(db,'egp_display_enabled','false',999);
+   await currencyMenu(db,env,601);
+   assert.ok(!sent.at(-1).reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='currency_set:EGP'));
+   assert.equal(c.prepare("SELECT currency_preference FROM users WHERE tg_id=601").get().currency_preference,'USD');
+ }finally{
+   globalThis.fetch=oldFetch;
+   c.close();
+ }
 });

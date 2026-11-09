@@ -163,8 +163,14 @@ export async function walletSummary(db,uid){
   return {currency,rate,walletIqd,shown,egpRateMinor};
 }
 export async function currencyMenu(db,env,uid,messageId=null){
-  const {currency,rate,egpRateMinor}=await walletSummary(db,uid);
-  const enabled=await getSetting(db,'egp_display_enabled','true')==='true';
+  const [summary,egpEnabledSetting]=await Promise.all([
+    walletSummary(db,uid),getSetting(db,'egp_display_enabled','true')
+  ]);
+  const {currency,rate}=summary;
+  const enabled=egpEnabledSetting==='true';
+  // Read the configured EGP rate independently of the user's current USD/IQD
+  // selection. Otherwise the EGP option is hidden until it is already selected.
+  const egpRateMinor=enabled?(summary.egpRateMinor??await egpRate(db)):null;
   const note=rate?`💱 السعر المعتمد من الإدارة: 1 USD = ${formatIQD(rate)}`:'⚠️ سعر صرف الدولار غير مهيأ بعد.';
   const egpNote=enabled&&egpRateMinor?'\n🇪🇬 السعر الثابت: 1 USD = '+formatEgpMinor(egpRateMinor):'';
   const selected=currency==='EGP'?'🇪🇬 الجنيه المصري (EGP)':currency==='USD'?'🇺🇸 الدولار الأمريكي (USD)':'🇮🇶 الدينار العراقي (IQD)';
