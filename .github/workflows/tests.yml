@@ -2,7 +2,7 @@ name: Test Telegram Worker
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature-lyd-currency-2026-11-09]
   pull_request:
   workflow_dispatch:
 
