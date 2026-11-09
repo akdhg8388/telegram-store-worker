@@ -2,7 +2,7 @@ import {languageOf,choice} from './i18n.js';
 import {button,keyboard,backRow,formatIQD,short} from './common.js';
 import {getUser,getProduct,getSession,setSession,clearSession} from './database.js';
 import {usdRate,formatUSD,baghdadDate} from './wallet.js';
-import {egpRate,formatPreferredIQD} from './display-currency.js';
+import {egpRate,lydRate,formatPreferredIQD} from './display-currency.js';
 import {sendText,telegram} from './telegram.js';
 import {trackPurchaseView} from './purchase-views.js';
 import {warrantyLine} from './warranty.js';
@@ -37,7 +37,7 @@ export async function beginPurchase(db,env,uid,p,nonceFactory=()=>crypto.randomU
   if(!status.ready)return sendText(env,uid,'⛔ '+status.reason);
   const [u,rate]=await Promise.all([getUser(db,uid),usdRate(db)]);
   const amount=Number(p.price_iqd),balance=Number(u?.wallet_balance_iqd||0);
-  const egp=u?.currency_preference==='EGP'?await egpRate(db):null;
+  const egp=u?.currency_preference==='EGP'?await egpRate(db):u?.currency_preference==='LYD'?await lydRate(db):null;
   const price=value=>formatPreferredIQD(value,u?.currency_preference||'USD',rate,egp);
   const title=short(languageOf(env)==='en'&&p.title_en||p.title,100);
   const warranty=warrantyLine(p,languageOf(env));
@@ -115,7 +115,7 @@ export async function showReceipt(db,env,uid,id){
     db.prepare("SELECT id FROM wallet_ledger WHERE source_key=? AND user_tg_id=? LIMIT 1")
       .bind('wallet_purchase:'+sale.id,uid).first()
   ]);
-  const egp=current?.currency_preference==='EGP'?await egpRate(db):null;
+  const egp=current?.currency_preference==='EGP'?await egpRate(db):current?.currency_preference==='LYD'?await lydRate(db):null;
   const format=value=>formatPreferredIQD(Number(value),current?.currency_preference||'USD',rate,egp);
   const english=languageOf(env)==='en';
   const name=short(english&&sale.current_title_en||sale.product_name,150);

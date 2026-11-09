@@ -25,7 +25,7 @@ const pairs=[
 ['لا يمكن الشراء حتى يجهّز المدير بيانات التسليم.','Purchasing is disabled until delivery data is ready.'],
 ['🛒 شراء فوري من المحفظة','🛒 Buy Now with Wallet'],['🔄 تحديث المخزون','🔄 Refresh Stock'],
 ['💔 إزالة من المفضلة','💔 Remove from Favorites'],['💗 إضافة للمفضلة','💗 Add to Favorites'],
-['💱 تغيير العملة 🇮🇶/🇺🇸/🇪🇬','💱 Change Currency 🇮🇶/🇺🇸/🇪🇬'],['💎 المنتجات المميزة','💎 Featured Products'],
+['💱 تغيير العملة 🇮🇶/🇺🇸/🇪🇬/🇱🇾','💱 Change Currency 🇮🇶/🇺🇸/🇪🇬/🇱🇾'],['💎 المنتجات المميزة','💎 Featured Products'],
 ['👤 ملفي الشخصي','👤 My Profile'],['📜 سجل العمليات','📜 Transaction History'],['👥 الإحالات','👥 Referrals'],
 ['🛍️ جميع المنتجات','🛍️ All Products'],['🛍️ المتجر','🛍️ Shop'],['🛍️ الأقسام','🛍️ Categories'],['🔎 البحث','🔎 Search'],['🔎 بحث','🔎 Search'],
 ['💳 محفظتي','💳 My Wallet'],['💳 المحفظة','💳 Wallet'],['📦 طلباتي','📦 My Orders'],['🌐 اللغة','🌐 Language'],['🎧 الدعم','🎧 Support'],['📢 الأخبار','📢 News'],
