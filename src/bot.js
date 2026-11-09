@@ -7,7 +7,8 @@ import * as ui from './ui.js';
 import {referralPage,referralHistory,referralAdminCallback,referralAdminText} from './referral-rewards.js';
 import {handleAdminCallback,handleAdminText} from './admin-controls.js';
 import {getSetting,storeAcceptsOrders,maintenanceActive} from './settings.js';
-import {USD_PRESETS,formatQuote,usdRate,isTopupEnabled,receiverFor,quoteMinor,quoteFromUSD,parseCustomMinor,topupStatusMessage,baghdadDate} from './wallet.js';
+import {USD_PRESETS,formatQuote,usdRate,isTopupEnabled,receiverFor,quoteMinor,quoteFromUSD,parseCustomMinor,topupStatusMessage,baghdadDate,egpTopupQuote} from './wallet.js';
+import {egpRate,formatEgpMinor,formatPreferredIQD} from './display-currency.js';
 import {amountInIQD,topupDecisionText,guardUser} from './moderation.js';
 import {submitSupport,handleSupportCallback,handleSupportReply,handleCustomerSupportCallback} from './support.js';
 import {handleUserCallback,handleUserText} from './admin-users.js';
@@ -83,11 +84,15 @@ async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   }
   if(!result.meta?.changes)return sendText(env,uid,'⏳ لديك 3 طلبات شحن معلقة. يرجى انتظار قرار المدير قبل إنشاء طلب جديد.');
   const id=result.meta.last_row_id;
+  if(p.displayCurrency==='EGP'&&Number.isSafeInteger(p.displayMinor)&&Number.isSafeInteger(p.egpRateMinor)){
+    await db.prepare("UPDATE topup_requests SET display_currency='EGP',display_amount_minor=?,display_egp_per_usd_minor=? WHERE id=? AND user_tg_id=?")
+      .bind(p.displayMinor,p.egpRateMinor,id,uid).run();
+  }
   await clearSession(db,uid);
   const u=await getUser(db,uid);
   const record=await db.prepare('SELECT * FROM topup_requests WHERE id=?').bind(id).first();
   const methodLabel=paymentName(await paymentMethod(db,env,p.method),'ar');
-  const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${methodLabel}\n💰 المطلوب: ${formatQuote(p)}${transferSummary(p)?'\n'+transferSummary(p):''}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
+  const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${methodLabel}\n💰 المطلوب: ${formatQuote(p)}${p.displayCurrency==='EGP'?' (مرجع محاسبي: '+formatIQD(p.amountIqd)+')':''}${transferSummary(p)?'\n'+transferSummary(p):''}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
   await notifyAdmins(db,env,text,p.proofFileId||null,keyboard([button('📋 فتح طلب الشحن',`topup_detail:${id}`,'primary')]),{topupRequestId:id});
   ctx.waitUntil(flushOutbox(db,env));
   const confirmation=await sendText(env,uid,`🟡 تم إرسال طلب الشحن #${id} للمراجعة.\n\n💰 ${formatQuote(p)}${transferSummary(p)?'\n'+transferSummary(p):''}\n💸 ${methodLabel}\n🗓️ ${baghdadDate(record.created_at)}\n\nتابع حالته من «طلباتي».`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
@@ -121,8 +126,9 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     const current=session.payload.currency||'IQD';
     const rate=await usdRate(db);
     const minor=parseCustomMinor(t,current);
-    const quote=quoteMinor(current,minor,rate);
-    if(!quote)return sendText(env,uid,current==='USD'?'أدخل مبلغاً صحيحاً بين 1 و1,000 دولار، مثل 25 أو 25.50.':'أدخل مبلغاً صحيحاً بالدينار، بين 1,000 و10,000,000، دون فواصل عشرية.');
+    const conversion=current==='EGP'?await egpRate(db):null;
+    const quote=current==='EGP'?egpTopupQuote(minor,rate,conversion):quoteMinor(current,minor,rate);
+    if(!quote)return sendText(env,uid,current==='EGP'?'❌ أدخل مبلغاً صحيحاً بالجنيه المصري، مثل 500 أو 500.50، ضمن حدود شحن المحفظة.':current==='USD'?'أدخل مبلغاً صحيحاً بين 1 و1,000 دولار، مثل 25 أو 25.50.':'أدخل مبلغاً صحيحاً بالدينار، بين 1,000 و10,000,000، دون فواصل عشرية.');
     const extended={...quote,quoteKey:crypto.randomUUID()};
     await setSession(db,uid,'topup_choose_method',extended);
     return ui.topupMethods(db,env,uid,extended);
@@ -174,8 +180,10 @@ async function handleTextState(db,env,ctx,uid,message,session) {
         '\n🧾 TXID: '+txid+'\n⚠️ رقم TXID معلومة عامة؛ تحقق من ملكية الحوالة قبل الاعتماد.',
         null,keyboard([button('📋 مراجعة الطلب',`topup_detail:${payment.topupId}`,'success')]),{topupRequestId:payment.topupId});
       ctx.waitUntil(flushOutbox(db,env));
+      const customer=await getUser(db,uid),fx=await usdRate(db);
+      const egp=customer?.currency_preference==='EGP'?await egpRate(db):null;
       return sendText(env,uid,'✅ تأكد وصول حوالة USDT عبر TronGrid.\n💸 المبلغ الفعلي: '+
-        formatUsdtMicro(payment.amountMicro)+'\n💰 القيمة بالدينار: '+formatIQD(payment.creditedIqd)+
+        formatUsdtMicro(payment.amountMicro)+'\n💰 قيمة الشحن: '+formatPreferredIQD(payment.creditedIqd,customer?.currency_preference,fx,egp)+
         '\n⏳ الطلب بانتظار مراجعة الإدارة لملكية الحوالة، ولم يُضف الرصيد بعد.\n🧾 رقم الشحن: #'+payment.topupId,
         keyboard([button('📦 طلباتي','orders','primary')],[button('💳 محفظتي','wallet','success')]));
     }
@@ -194,10 +202,12 @@ async function handleTextState(db,env,ctx,uid,message,session) {
       })[payment.status]||'⚠️ لم يُضف أي رصيد؛ تواصل مع الدعم.');
       await clearSession(db,uid);
       ctx.waitUntil(flushOutbox(db,env));
-      const account=await getUser(db,uid);
+      const account=await getUser(db,uid),rate=await usdRate(db);
+      const egp=account?.currency_preference==='EGP'?await egpRate(db):null;
+      const shown=v=>formatPreferredIQD(v,account?.currency_preference,rate,egp);
       return sendText(env,uid,'✅ تم تأكيد تحويل USDT TRC20 وشحن محفظتك تلقائياً!\n💸 المحوّل: '+formatUsdtMicro(payment.amountMicro)+
-        '\n💰 المضاف: '+formatIQD(payment.creditedIqd)+
-        '\n💳 رصيدك: '+formatIQD(account.wallet_balance_iqd)+
+        '\n💰 المضاف: '+shown(payment.creditedIqd)+
+        '\n💳 رصيدك: '+shown(account.wallet_balance_iqd)+
         '\n🧾 رقم الشحن: #'+payment.topup.id,
         keyboard([button('💳 محفظتي','wallet','success')],[button('📦 طلباتي','orders','primary')]));
     }
@@ -224,9 +234,11 @@ async function handleTextState(db,env,ctx,uid,message,session) {
         keyboard([button('➕ تحديد مبلغ الدفعة التالية','topup_trc20_split:'+intent.id,'primary')],[button('❌ إلغاء الطلب','topup_cancel','danger')]));
     }
     await clearSession(db,uid);
-    const account=await getUser(db,uid);
-    return sendText(env,uid,'✅ اكتملت جميع دفعات USDT، وتم شحن محفظتك تلقائياً!\n💰 المضاف: '+formatIQD(payment.topup.amount_iqd)+
-      '\n💳 رصيدك: '+formatIQD(account.wallet_balance_iqd)+'\n🧾 رقم الطلب: #'+payment.topup.id,
+    const account=await getUser(db,uid),rate=await usdRate(db);
+    const egp=account?.currency_preference==='EGP'?await egpRate(db):null;
+    const shown=v=>formatPreferredIQD(v,account?.currency_preference,rate,egp);
+    return sendText(env,uid,'✅ اكتملت جميع دفعات USDT، وتم شحن محفظتك تلقائياً!\n💰 المضاف: '+shown(payment.topup.amount_iqd)+
+      '\n💳 رصيدك: '+shown(account.wallet_balance_iqd)+'\n🧾 رقم الطلب: #'+payment.topup.id,
       keyboard([button('💳 محفظتي','wallet','success')],[button('📦 طلباتي','orders','primary')]));
   }
   if(session.action==='topup_evidence'||session.action==='topup_confirm'){
@@ -687,11 +699,20 @@ async function handleCallback(db,env,ctx,q){
   if(data==='currency')return ui.currencyMenu(db,env,uid,q.message?.message_id);
   if(data.startsWith('currency_set:')){
     const currency=data.split(':')[1];
-    if(!['IQD','USD'].includes(currency))return;
+    if(!['IQD','USD','EGP'].includes(currency))return;
     await clearSession(db,uid);
     const existing=await getUser(db,uid);
-    if(existing?.currency_preference!==currency)
-      await db.prepare('UPDATE users SET currency_preference=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(currency,uid).run();
+    if(currency==='EGP'){
+      if(await getSetting(db,'egp_display_enabled','false')!=='true'||!await egpRate(db))
+        return sendText(env,uid,'⛔ الجنيه المصري غير مفعّل حالياً. اختر الدولار أو الدينار.');
+      if(existing?.currency_preference!=='EGP')
+        await db.prepare('INSERT OR IGNORE INTO user_egp_display(user_tg_id) VALUES(?)').bind(uid).run();
+    }else if(existing?.currency_preference!==currency){
+      await db.batch([
+        db.prepare('DELETE FROM user_egp_display WHERE user_tg_id=?').bind(uid),
+        db.prepare('UPDATE users SET currency_preference=?,updated_at=CURRENT_TIMESTAMP WHERE tg_id=?').bind(currency,uid)
+      ]);
+    }
     return ui.currencyMenu(db,env,uid,q.message?.message_id);
   }
   if(data==='topup'){
@@ -730,11 +751,12 @@ async function handleCallback(db,env,ctx,q){
     await trackTopupView(db,uid,q.message?.message_id);
     const [,rawUsd,displayedCurrency]=data.split(':');
     const usd=positiveInt(rawUsd);
-    if(!USD_PRESETS.includes(usd)||!['IQD','USD'].includes(displayedCurrency))return;
+    if(!USD_PRESETS.includes(usd)||!['IQD','USD','EGP'].includes(displayedCurrency))return;
     const w=await ui.walletSummary(db,uid);
     if(w.currency!==displayedCurrency)return sendText(env,uid,'تغيرت العملة منذ عرض هذه الأزرار؛ افتح قائمة الشحن مجدداً.');
-    const quote=quoteFromUSD(usd,w.rate,w.currency);
-    if(!quote)return sendText(env,uid,'لا يمكن تحديد المبلغ قبل ضبط سعر الصرف.');
+    const base=quoteFromUSD(usd,w.rate,w.currency==='EGP'?'IQD':w.currency);
+    const quote=base&&w.currency==='EGP'&&w.egpRateMinor?{...base,displayCurrency:'EGP',displayMinor:usd*w.egpRateMinor,egpRateMinor:w.egpRateMinor}:base;
+    if(!quote||w.currency==='EGP'&&!w.egpRateMinor)return sendText(env,uid,'لا يمكن تحديد المبلغ قبل ضبط سعر الصرف.');
     const extended={...quote,quoteKey:crypto.randomUUID()};
     await setSession(db,uid,'topup_choose_method',extended);
     return ui.topupMethods(db,env,uid,extended,q.message?.message_id);
@@ -743,7 +765,7 @@ async function handleCallback(db,env,ctx,q){
     await trackTopupView(db,uid,q.message?.message_id);
     const w=await ui.walletSummary(db,uid);
     await setSession(db,uid,'topup_custom',{currency:w.currency});
-    return sendText(env,uid,`✏️ أدخل المبلغ المخصص بعملة ${w.currency}\n\n${w.currency==='USD'?'مثال: 25.50':'مثال: 25000'}\nللإلغاء: /cancel`);
+    return sendText(env,uid,`✏️ أدخل المبلغ المخصص بعملة ${w.currency}\n\n${w.currency==='EGP'?'مثال: 500.50':w.currency==='USD'?'مثال: 25.50':'مثال: 25000'}\nللإلغاء: /cancel`);
   }
   if(data.startsWith('topup_trc20_paid:')){
     const id=data.slice('topup_trc20_paid:'.length);
@@ -768,6 +790,10 @@ async function handleCallback(db,env,ctx,q){
       let intent;
       try{intent=await newTrc20Intent(db,uid,session.payload,selected,env)}
       catch(e){console.error('TRC20 intent not created',String(e));return sendText(env,uid,'⛔ تعذر تجهيز طلب TRC20. تأكد من العنوان والرسوم، أو استخدم وسيلة أخرى.');}
+      if(session.payload.displayCurrency==='EGP'){
+        await db.prepare("UPDATE trc20_payment_intents SET display_currency='EGP',display_amount_minor=?,display_egp_per_usd_minor=? WHERE id=? AND user_tg_id=?")
+          .bind(session.payload.displayMinor,session.payload.egpRateMinor,intent.intentId,uid).run();
+      }
       await setSession(db,uid,'topup_trc20_txid',{intentId:intent.intentId});
       return ui.topupTrc20(db,env,uid,intent,session.payload,q.message?.message_id);
     }
