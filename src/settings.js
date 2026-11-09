@@ -1,4 +1,5 @@
 import {homeButtonSettings} from './home-buttons.js';
+import {parseEgpPerUsdMinor} from './display-currency.js';
 // The only values that an administrator may edit from Telegram. Secrets and identity are immutable here.
 export const SETTING_FIELDS=Object.freeze({
   store_name: {label:'🏪 اسم المتجر',max:80,required:true},
@@ -34,6 +35,8 @@ export const SETTING_FIELDS=Object.freeze({
   zain_balance_receiver: {label:'📱 رقم استقبال رصيد زين',max:250},
   binance_receiver: {label:'🟡 Binance Pay ID أو العنوان والشبكة',max:350},
   usd_rate_iqd: {label:'💱 سعر الدولار بالدينار العراقي (لكل 1 USD)',max:5,required:true,rate:true},
+  egp_rate_per_usd: {label:'🇪🇬 سعر 1 دولار بالجنيه المصري (ثابت)',max:7,required:true,egpRate:true},
+  egp_display_enabled: {label:'🇪🇬 إظهار الجنيه المصري للزبائن',max:5,toggle:true},
   manual_topups_enabled: {label:'💳 تشغيل طلبات شحن المحفظة',max:5,toggle:true},
   store_enabled: {label:'🔌 استقبال طلبات جديدة',max:5,toggle:true},
   maintenance_enabled: {label:'🛠️ وضع الصيانة',max:5,toggle:true},
@@ -55,6 +58,7 @@ export function validateSetting(key,input){
   if(field.customEmoji && value && !/^\d{10,30}$/.test(value))return {ok:false,reason:'أرسل custom_emoji_id الصحيح أو أرسل رسالة تتضمن الرمز المتحرك، أو /empty للمسح.'};
   if(key==='referral_welcome_bonus_iqd' && (!/^\d+$/.test(value) || Number(value)>1000000))return {ok:false,reason:'قيمة الهدية بين 0 و1,000,000.'};
   if(field.rate && (!/^\d+$/.test(value) || Number(value)<100 || Number(value)>10000))return {ok:false,reason:'أدخل سعراً صحيحاً بين 100 و10,000 دينار لكل دولار واحد.'};
+  if(field.egpRate && !parseEgpPerUsdMinor(value))return {ok:false,reason:'اكتب عدد الجنيهات لكل دولار، مثل 54.24، بمنزلتين عشريتين كحد أقصى.'};
   if(field.toggle && !['true','false'].includes(value))return {ok:false,reason:'اختر تفعيل أو تعطيل من لوحة الإدارة.'};
   if(field.required && !value)return {ok:false,reason:'لا يمكن ترك هذا الحقل فارغاً.'};
   if(value.length>field.max)return {ok:false,reason:`الحد الأقصى ${field.max} حرف.`};
