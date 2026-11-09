@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
 import {
  parseLydPerUsdMilli,formatLydMilli,lydQuoteToIQD,lydRate,
- lydRateFromVisual,formatPreferredIQD,rateFromVisual
+ lydRateFromVisual,formatPreferredIQD,rateFromVisual,egpRate
 } from '../src/display-currency.js';
 import {
  formatQuote,quoteFromUSD,lydTopupQuote,parseCustomMinor,topupStatusMessage,usdRate
@@ -13,6 +13,8 @@ import {getUser} from '../src/database.js';
 import {validateSetting,updateSetting} from '../src/settings.js';
 import {home,products,productView,wallet,currencyMenu,walletSummary,topupPresets} from '../src/ui.js';
 import {paymentQuote} from '../src/payment-quote.js';
+import {processUpdate} from '../src/bot.js';
+import {handleAdminCallback,adminRoute} from '../src/admin-controls.js';
 
 function fixture(){
  const c=new DatabaseSync(':memory:');
@@ -134,4 +136,52 @@ test('Libyan topups are display-only: existing IQD payment rails, original amoun
  assert.match(topupStatusMessage(request,'LYD',1520,6430),/321\.500 د\.ل/);
  assert.equal(formatQuote({...request,displayCurrency:'LYD'}),'643.000 د.ل');
  assert.equal(quoteFromUSD(100,1520,'IQD').amountIqd,152000);
+});
+
+
+test('Customer can switch LYD, EGP, USD and IQD without changing wallet ledger',async()=>{
+ const {c,db}=fixture();
+ try{await capture(async calls=>{
+   c.prepare("INSERT INTO users(tg_id,first_name,currency_preference) VALUES(704,'Switcher','USD')").run();
+   c.prepare("INSERT INTO bot_settings(key,value) VALUES('usd_rate_iqd','1520')").run();
+   c.prepare("INSERT INTO wallet_ledger(user_tg_id,delta_iqd,kind,source_key) VALUES(704,152000,'topup','currency-switch-test')").run();
+   const jobs=[];
+   const send=async(data,id)=>processUpdate(db,env,{waitUntil(p){jobs.push(p)}},{
+     update_id:id,callback_query:{id:'lyd'+id,from:{id:704,first_name:'Switcher'},message:{message_id:900,chat:{id:704,type:'private'}},data}
+   });
+   await send('currency_set:LYD',940001);
+   assert.equal((await getUser(db,704)).currency_preference,'LYD');
+   assert.equal((await walletSummary(db,704)).shown,'643.000 د.ل');
+   await send('currency_set:EGP',940002);
+   assert.equal((await getUser(db,704)).currency_preference,'EGP');
+   assert.equal(c.prepare('SELECT COUNT(*) n FROM user_lyd_display WHERE user_tg_id=704').get().n,0);
+   await send('currency_set:USD',940003);
+   assert.equal((await getUser(db,704)).currency_preference,'USD');
+   await send('currency_set:IQD',940004);
+   assert.equal((await getUser(db,704)).currency_preference,'IQD');
+   assert.equal(c.prepare('SELECT wallet_balance_iqd n FROM users WHERE tg_id=704').get().n,152000);
+   assert.equal(c.prepare('SELECT COUNT(*) n FROM wallet_ledger WHERE user_tg_id=704').get().n,1);
+   assert.ok(calls.some(x=>x.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='currency_set:LYD')));
+ });}finally{c.close()}
+});
+
+test('Owner manages LYD rate and visibility, preserving the Egyptian exchange setting',async()=>{
+ const {c,db}=fixture();
+ try{await capture(async calls=>{
+   c.prepare("INSERT INTO users(tg_id,first_name,currency_preference) VALUES(991,'Owner','USD'),(705,'Customer','USD')").run();
+   c.prepare('INSERT INTO user_lyd_display(user_tg_id) VALUES(705)').run();
+   assert.equal(adminRoute('admin_lyd'),true);
+   assert.equal(adminRoute('admin_lyd_toggle'),true);
+   assert.equal(await handleAdminCallback(db,env,991,'admin_lyd'),true);
+   assert.ok(calls.at(-1).text.includes('6.43'));
+   assert.ok(calls.at(-1).reply_markup.inline_keyboard.flat().some(x=>x.callback_data==='admin_setting_edit:lyd_rate_per_usd'));
+   await handleAdminCallback(db,env,991,'admin_lyd_toggle');
+   assert.equal(c.prepare("SELECT value FROM bot_settings WHERE key='lyd_display_enabled'").get().value,'false');
+   assert.equal((await getUser(db,705)).currency_preference,'USD');
+   assert.equal(c.prepare('SELECT enabled FROM user_lyd_display WHERE user_tg_id=705').get().enabled,0);
+   await handleAdminCallback(db,env,991,'admin_lyd_toggle');
+   assert.equal((await getUser(db,705)).currency_preference,'LYD');
+   assert.equal(c.prepare('SELECT enabled FROM user_lyd_display WHERE user_tg_id=705').get().enabled,1);
+   assert.equal((await egpRate(db)),5424);
+ });}finally{c.close()}
 });
