@@ -3,6 +3,7 @@ import {sendText,sendOrEditText} from './telegram.js';
 import {setSession,clearSession,audit,getUser} from './database.js';
 import {choice,languageOf} from './i18n.js';
 import {usdRate,formatUSD} from './wallet.js';
+import {egpRate,formatPreferredIQD} from './display-currency.js';
 import {getSetting,updateSetting} from './settings.js';
 import {homeSettingKey} from './home-buttons.js';
 export const policy=db=>db.prepare('SELECT * FROM referral_policy WHERE id=1').first();
@@ -11,7 +12,8 @@ export async function referralPage(db,env,uid,messageId=null){
   policy(db),db.prepare('SELECT count(*) n FROM referrals WHERE referrer_tg_id=?').bind(uid).first(),
   db.prepare('SELECT COUNT(*) n, COALESCE(SUM(reward_iqd),0) total FROM referral_rewards WHERE referrer_tg_id=?').bind(uid).first(),
   getUser(db,uid),usdRate(db)]);
- const en=languageOf(env)==='en', money=u?.currency_preference==='USD'&&rate?formatUSD(Math.round(Number(total?.total||0)*100/rate)):formatIQD(total?.total);
+ const egp=u?.currency_preference==='EGP'?await egpRate(db):null;
+ const en=languageOf(env)==='en', money=formatPreferredIQD(Number(total?.total||0),u?.currency_preference||'USD',rate,egp);
  const link=env.BOT_USERNAME?'https://t.me/'+env.BOT_USERNAME.replace(/^@/,'')+'?start=ref_'+uid:choice(env,'اسم البوت غير مضبوط','Bot username not set');
  const cap=p.max_purchases===0?choice(env,'مدى الحياة','Lifetime'):String(p.max_purchases);
  const lines=[choice(env,'👥 برنامج الإحالات','👥 Referral Program'),'',
@@ -30,8 +32,13 @@ export async function referralPage(db,env,uid,messageId=null){
  [button(choice(env,'📜 سجل الأرباح','📜 Earnings History'),'referral_history','primary')],backRow()),messageId,{preserveText:true});
 }
 export async function referralHistory(db,env,uid,messageId=null){
- const rows=(await db.prepare('SELECT purchase_id,reward_iqd,created_at FROM referral_rewards WHERE referrer_tg_id=? ORDER BY id DESC LIMIT 15').bind(uid).all()).results||[];
- return sendOrEditText(env,uid,choice(env,'📜 سجل أرباح الإحالات','📜 Referral Earnings History')+'\n\n'+(rows.map(x=>'#'+x.purchase_id+' • '+formatIQD(x.reward_iqd)+' • '+x.created_at).join('\n')||choice(env,'لا توجد مكافآت بعد.','No rewards yet.')),keyboard([button(choice(env,'↩️ الإحالات','↩️ Referrals'),'referrals')],backRow()),messageId,{preserveText:true});
+ const [result,user,rate]=await Promise.all([
+   db.prepare('SELECT purchase_id,reward_iqd,created_at FROM referral_rewards WHERE referrer_tg_id=? ORDER BY id DESC LIMIT 15').bind(uid).all(),
+   getUser(db,uid),usdRate(db)
+ ]);
+ const rows=result.results||[];
+ const egp=user?.currency_preference==='EGP'?await egpRate(db):null;
+ return sendOrEditText(env,uid,choice(env,'📜 سجل أرباح الإحالات','📜 Referral Earnings History')+'\n\n'+(rows.map(x=>'#'+x.purchase_id+' • '+formatPreferredIQD(x.reward_iqd,user?.currency_preference||'USD',rate,egp)+' • '+x.created_at).join('\n')||choice(env,'لا توجد مكافآت بعد.','No rewards yet.')),keyboard([button(choice(env,'↩️ الإحالات','↩️ Referrals'),'referrals')],backRow()),messageId,{preserveText:true});
 }
 const fields={basis_points:['📊 النسبة المئوية (اكتب 5 للنسبة 5%)',0,30],max_purchases:['🔢 عدد مرات المكافأة لكل صديق (0 = مدى الحياة)',0,100000],min_purchase_iqd:['💰 الحد الأدنى لعملية الشراء بالدينار',0,100000000],max_reward_iqd:['🛡️ سقف مكافأة الشراء الواحد (0 = غير محدود)',0,100000000],referral_welcome_bonus_iqd:['🎉 هدية المدعو عند أول شراء (0 = تعطيل)',0,1000000]};
 const ownerBack=[button('🛡️ لوحة المدير','admin')];
