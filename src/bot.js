@@ -111,7 +111,7 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     const topup=await db.prepare("SELECT * FROM topup_requests WHERE id=? AND status='pending'").bind(id).first();
     if(!topup){await clearSession(db,uid);return sendText(env,uid,'تمت معالجة الطلب أو لم يعد متاحاً.');}
     const amount=amountInIQD(t,topup.amount_iqd);
-    if(!amount)return sendText(env,uid,`أدخل مبلغاً صحيحاً من 1 إلى ${formatIQD(topup.amount_iqd)}، دون فواصل عشرية. يمكن اعتماد مبلغ أقل مما طلبه العميل.`);
+    if(!amount)return sendText(env,uid,`أدخل مبلغاً صحيحاً من 1 إلى ${formatIQD(topup.amount_iqd)}، دون فواصل عشرية. ${topup.display_currency==='EGP'&&topup.display_amount_minor?'مقابل طلب العميل: '+formatEgpMinor(topup.display_amount_minor)+'. ':''}يمكن اعتماد مبلغ أقل مما طلبه العميل.`);
     await clearSession(db,uid);
     return showTopupApproval(db,env,uid,id,amount);
   }
@@ -827,7 +827,7 @@ async function handleCallback(db,env,ctx,q){
     const row=await db.prepare("SELECT * FROM topup_requests WHERE id=? AND status='pending'").bind(id).first();
     if(!row)return sendText(env,uid,'الطلب غير متاح.');
     await setSession(db,uid,'owner_topup_amount',{id});
-    return sendText(env,uid,`✏️ أدخل المبلغ الذي وصل فعلياً بالدينار العراقي للطلب #${id}.\nالمبلغ المطلوب: ${formatIQD(row.amount_iqd)}\nيمكنك اعتماد مبلغ أقل؛ مثال: 100000\nللإلغاء /cancel.`);
+    return sendText(env,uid,`✏️ أدخل المبلغ الذي وصل فعلياً بالدينار العراقي للطلب #${id}.\nالمبلغ المطلوب: ${formatIQD(row.amount_iqd)}${row.display_currency==='EGP'&&row.display_amount_minor?'\nعملة الزبون: '+formatEgpMinor(row.display_amount_minor):''}\nيمكنك اعتماد مبلغ أقل؛ مثال: 100000\nللإلغاء /cancel.`);
   }
   if(data.startsWith('topup_commit:')){const [,rawId,rawAmt]=data.split(':');return settleTopup(db,env,ctx,uid,Number(rawId),Number(rawAmt),q.message?.message_id)}
   if(data.startsWith('topup_reject:'))return settleTopup(db,env,ctx,uid,Number(data.split(':')[1]),null,q.message?.message_id);
