@@ -1,7 +1,7 @@
 import {formatIQD, short, moneyMethods} from './common.js';
 import {getSetting} from './settings.js';
 import {paymentMethod} from './payment-methods.js';
-import {formatEgpMinor,formatPreferredIQD,egpQuoteToIQD} from './display-currency.js';
+import {formatEgpMinor,formatLydMilli,formatPreferredIQD,egpQuoteToIQD,lydQuoteToIQD} from './display-currency.js';
 
 export const USD_PRESETS = Object.freeze([10,25,100,250,500,1000]);
 export const PAY_METHODS = Object.freeze(['zain_balance','superqi','binance']);
@@ -15,6 +15,10 @@ export function formatUSD(cents){
   return '$'+(cents/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 export function formatQuote(quote) {
+  if(quote?.displayCurrency==='LYD'||quote?.display_currency==='LYD'){
+    const milli=Number(quote.displayMinor??quote.display_amount_minor);
+    if(Number.isSafeInteger(milli)&&milli>=0)return formatLydMilli(milli);
+  }
   if(quote?.displayCurrency==='EGP'||quote?.display_currency==='EGP'){
     const minor=Number(quote.displayMinor??quote.display_amount_minor);
     if(Number.isSafeInteger(minor)&&minor>=0)return formatEgpMinor(minor);
@@ -29,6 +33,12 @@ export function egpTopupQuote(minor,usdIqd,egpPerUsdMinor){
  if(amountIqd===null)return null;
  return {currency:'IQD',requestedMinor:amountIqd,amountIqd,rate:usdIqd,
    displayCurrency:'EGP',displayMinor:minor,egpRateMinor:egpPerUsdMinor};
+}
+export function lydTopupQuote(milli,usdIqd,lydPerUsdMilli){
+ const amountIqd=lydQuoteToIQD(milli,usdIqd,lydPerUsdMilli);
+ if(amountIqd===null)return null;
+ return {currency:'IQD',requestedMinor:amountIqd,amountIqd,rate:usdIqd,
+  displayCurrency:'LYD',displayMinor:milli,lydRateMilli:lydPerUsdMilli};
 }
 export function validRate(raw){
   const v=Number(raw);
@@ -56,6 +66,12 @@ export function quoteMinor(currency,minor,rate){
 export function parseCustomMinor(input,currency){
   const value=String(input).trim().replace(/,/g,'');
   if(currency==='IQD')return /^\d{1,8}$/.test(value) ? Number(value):null;
+  if(currency==='LYD'){
+    if(!/^\d{1,5}(?:\.\d{1,3})?$/.test(value))return null;
+    const [whole,fraction='']=value.split('.');
+    const milli=Number(whole)*1000+Number(fraction.padEnd(3,'0'));
+    return Number.isSafeInteger(milli)?milli:null;
+  }
   if(!new RegExp(currency==='EGP'?'^\\d{1,6}(?:\\.\\d{1,2})?$':'^\\d{1,4}(?:\\.\\d{1,2})?$').test(value))return null;
   const [whole,fraction='']=value.split('.');
   const minor=Number(whole)*100+Number(fraction.padEnd(2,'0'));
@@ -73,11 +89,12 @@ export function quoteOfRecord(row){return {
   currency:row.requested_currency||'IQD',requestedMinor:row.requested_amount_minor||row.amount_iqd,
   amountIqd:row.amount_iqd,rate:row.quoted_rate_iqd||null,
   displayCurrency:row.display_currency||null,displayMinor:row.display_amount_minor,
-  egpRateMinor:row.display_egp_per_usd_minor
+  egpRateMinor:row.display_egp_per_usd_minor,
+  lydRateMilli:row.display_lyd_per_usd_milli
 };}
 export function topupStatusMessage(row,currency=null,usdIqd=null,egpRateMinor=null){
-  const preferred=currency==='EGP'&&egpRateMinor&&usdIqd
-    ?value=>formatPreferredIQD(value,'EGP',usdIqd,egpRateMinor)
+  const preferred=(currency==='LYD'||currency==='EGP')&&egpRateMinor&&usdIqd
+    ?value=>formatPreferredIQD(value,currency,usdIqd,egpRateMinor)
     :currency==='USD'&&usdIqd?value=>formatPreferredIQD(value,'USD',usdIqd,null)
     :currency==='IQD'?formatIQD:null;
   const requested=preferred?preferred(row.amount_iqd):formatQuote(quoteOfRecord(row));

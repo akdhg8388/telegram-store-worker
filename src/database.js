@@ -17,7 +17,8 @@ export async function getUser(db, userId) {
   // optional migration can still inspect existing users.
   try{
     const row=await db.prepare("SELECT u.*, CASE WHEN "+
-      "EXISTS(SELECT 1 FROM user_egp_display WHERE user_tg_id=u.tg_id AND enabled=1) THEN 'EGP' "+
+      "EXISTS(SELECT 1 FROM user_lyd_display WHERE user_tg_id=u.tg_id AND enabled=1) THEN 'LYD' "+
+      "WHEN EXISTS(SELECT 1 FROM user_egp_display WHERE user_tg_id=u.tg_id AND enabled=1) THEN 'EGP' "+
       "ELSE u.currency_preference END AS selected_currency FROM users u WHERE u.tg_id=?").bind(userId).first();
     return row?{...row,currency_preference:row.selected_currency||row.currency_preference}:null;
   }catch(error){
