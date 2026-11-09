@@ -40,7 +40,9 @@ export async function egpRate(db){
  return parseEgpPerUsdMinor(row?.value??EGP_DEFAULT_RATE);
 }
 export async function displayRate(db,currency){return currency==='EGP'?egpRate(db):null}
-export function rateFromVisual(settings){return parseEgpPerUsdMinor(settings?.egp_rate_per_usd)}
+// Use the same fixed default as egpRate() and the admin screen when no
+// explicit owner override exists. No extra D1 read is needed on storefronts.
+export function rateFromVisual(settings){return parseEgpPerUsdMinor(settings?.egp_rate_per_usd??EGP_DEFAULT_RATE)}
 export function egpDisplayEnabled(settings){return settings?.egp_display_enabled==='true'}
 export function formatStoredQuote(row,viewCurrency='',usdIqd=null,egpPerUsdMinor=null){
  const currency=viewCurrency||row.display_currency||row.displayCurrency||row.currency||row.requested_currency;
