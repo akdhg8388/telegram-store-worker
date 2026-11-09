@@ -15,8 +15,8 @@ export function formatUSD(cents){
   return '$'+(cents/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 export function formatQuote(quote) {
-  if(quote?.displayCurrency==='LYD'||quote?.display_currency==='LYD'){
-    const milli=Number(quote.displayMinor??quote.display_amount_minor);
+  if(quote?.displayCurrency==='LYD'||quote?.display_lyd_amount_milli!=null){
+    const milli=Number(quote.displayMinor??quote.display_lyd_amount_milli);
     if(Number.isSafeInteger(milli)&&milli>=0)return formatLydMilli(milli);
   }
   if(quote?.displayCurrency==='EGP'||quote?.display_currency==='EGP'){
@@ -90,7 +90,8 @@ export function quoteOfRecord(row){return {
   amountIqd:row.amount_iqd,rate:row.quoted_rate_iqd||null,
   displayCurrency:row.display_currency||null,displayMinor:row.display_amount_minor,
   egpRateMinor:row.display_egp_per_usd_minor,
-  lydRateMilli:row.display_lyd_per_usd_milli
+  lydRateMilli:row.display_lyd_per_usd_milli,
+  display_lyd_amount_milli:row.display_lyd_amount_milli
 };}
 export function topupStatusMessage(row,currency=null,usdIqd=null,egpRateMinor=null){
   const preferred=(currency==='LYD'||currency==='EGP')&&egpRateMinor&&usdIqd

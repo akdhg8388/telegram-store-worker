@@ -84,6 +84,10 @@ async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   }
   if(!result.meta?.changes)return sendText(env,uid,'⏳ لديك 3 طلبات شحن معلقة. يرجى انتظار قرار المدير قبل إنشاء طلب جديد.');
   const id=result.meta.last_row_id;
+  if(p.displayCurrency==='LYD'&&Number.isSafeInteger(p.displayMinor)&&Number.isSafeInteger(p.lydRateMilli)){
+    await db.prepare("UPDATE topup_requests SET display_lyd_amount_milli=?,display_lyd_per_usd_milli=? WHERE id=? AND user_tg_id=?")
+      .bind(p.displayMinor,p.lydRateMilli,id,uid).run();
+  }
   if(p.displayCurrency==='EGP'&&Number.isSafeInteger(p.displayMinor)&&Number.isSafeInteger(p.egpRateMinor)){
     await db.prepare("UPDATE topup_requests SET display_currency='EGP',display_amount_minor=?,display_egp_per_usd_minor=? WHERE id=? AND user_tg_id=?")
       .bind(p.displayMinor,p.egpRateMinor,id,uid).run();
@@ -92,7 +96,7 @@ async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   const u=await getUser(db,uid);
   const record=await db.prepare('SELECT * FROM topup_requests WHERE id=?').bind(id).first();
   const methodLabel=paymentName(await paymentMethod(db,env,p.method),'ar');
-  const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${methodLabel}\n💰 المطلوب: ${formatQuote(p)}${p.displayCurrency==='EGP'?' (مرجع محاسبي: '+formatIQD(p.amountIqd)+')':''}${transferSummary(p)?'\n'+transferSummary(p):''}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
+  const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${methodLabel}\n💰 المطلوب: ${formatQuote(p)}${['EGP','LYD'].includes(p.displayCurrency)?' (مرجع محاسبي: '+formatIQD(p.amountIqd)+')':''}${transferSummary(p)?'\n'+transferSummary(p):''}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
   await notifyAdmins(db,env,text,p.proofFileId||null,keyboard([button('📋 فتح طلب الشحن',`topup_detail:${id}`,'primary')]),{topupRequestId:id});
   ctx.waitUntil(flushOutbox(db,env));
   const confirmation=await sendText(env,uid,`🟡 تم إرسال طلب الشحن #${id} للمراجعة.\n\n💰 ${formatQuote(p)}${transferSummary(p)?'\n'+transferSummary(p):''}\n💸 ${methodLabel}\n🗓️ ${baghdadDate(record.created_at)}\n\nتابع حالته من «طلباتي».`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
@@ -111,7 +115,7 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     const topup=await db.prepare("SELECT * FROM topup_requests WHERE id=? AND status='pending'").bind(id).first();
     if(!topup){await clearSession(db,uid);return sendText(env,uid,'تمت معالجة الطلب أو لم يعد متاحاً.');}
     const amount=amountInIQD(t,topup.amount_iqd);
-    if(!amount)return sendText(env,uid,`أدخل مبلغاً صحيحاً من 1 إلى ${formatIQD(topup.amount_iqd)}، دون فواصل عشرية. ${topup.display_currency==='EGP'&&topup.display_amount_minor?'مقابل طلب العميل: '+formatEgpMinor(topup.display_amount_minor)+'. ':''}يمكن اعتماد مبلغ أقل مما طلبه العميل.`);
+    if(!amount)return sendText(env,uid,`أدخل مبلغاً صحيحاً من 1 إلى ${formatIQD(topup.amount_iqd)}، دون فواصل عشرية. ${topup.display_lyd_amount_milli!=null?'مقابل طلب العميل: '+formatLydMilli(topup.display_lyd_amount_milli)+'. ':topup.display_currency==='EGP'&&topup.display_amount_minor?'مقابل طلب العميل: '+formatEgpMinor(topup.display_amount_minor)+'. ':''}يمكن اعتماد مبلغ أقل مما طلبه العميل.`);
     await clearSession(db,uid);
     return showTopupApproval(db,env,uid,id,amount);
   }
@@ -467,7 +471,7 @@ async function topupDetail(db,env,uid,id,messageId=null){
   const t=await db.prepare('SELECT t.*,u.first_name,u.username FROM topup_requests t JOIN users u ON u.tg_id=t.user_tg_id WHERE t.id=?').bind(id).first();
   if(!t)return sendText(env,uid,'الطلب غير موجود.');
   const detailName=paymentName(await paymentMethod(db,env,t.custom_method_key||t.method),'ar');
-  const summary=`📋 طلب شحن #${id}\n\n👤 الاسم: ${short(t.first_name,80)}\n🔗 المعرف: ${t.username?'@'+t.username:'غير متوفر'}\n🆔 Telegram ID: ${t.user_tg_id}\n💰 المبلغ المطلوب: ${t.display_currency==='EGP'&&t.display_amount_minor?formatEgpMinor(t.display_amount_minor)+' (≈ '+formatIQD(t.amount_iqd)+')':formatIQD(t.amount_iqd)}\n💸 الوسيلة: ${detailName}\n🔢 رقم الحوالة: ${short(t.transfer_reference||'غير مرفق',150)}\n📸 الإثبات: ${t.proof_file_id?'صورة مرفقة':'رقم حوالة'}\n🗓️ تاريخ الطلب: ${baghdadDate(t.created_at)}\n📌 الحالة: ${t.status==='pending'?'قيد المراجعة':t.status==='approved'?'✅ مكتمل':'❌ مرفوض'}${t.decided_at?'\n🗓️ تاريخ القرار: '+baghdadDate(t.decided_at):''}${t.credited_amount_iqd!==null?'\n✅ المبلغ المعتمد: '+formatIQD(t.credited_amount_iqd):''}`;
+  const summary=`📋 طلب شحن #${id}\n\n👤 الاسم: ${short(t.first_name,80)}\n🔗 المعرف: ${t.username?'@'+t.username:'غير متوفر'}\n🆔 Telegram ID: ${t.user_tg_id}\n💰 المبلغ المطلوب: ${t.display_lyd_amount_milli!=null?formatLydMilli(t.display_lyd_amount_milli)+' (≈ '+formatIQD(t.amount_iqd)+')':t.display_currency==='EGP'&&t.display_amount_minor?formatEgpMinor(t.display_amount_minor)+' (≈ '+formatIQD(t.amount_iqd)+')':formatIQD(t.amount_iqd)}\n💸 الوسيلة: ${detailName}\n🔢 رقم الحوالة: ${short(t.transfer_reference||'غير مرفق',150)}\n📸 الإثبات: ${t.proof_file_id?'صورة مرفقة':'رقم حوالة'}\n🗓️ تاريخ الطلب: ${baghdadDate(t.created_at)}\n📌 الحالة: ${t.status==='pending'?'قيد المراجعة':t.status==='approved'?'✅ مكتمل':'❌ مرفوض'}${t.decided_at?'\n🗓️ تاريخ القرار: '+baghdadDate(t.decided_at):''}${t.credited_amount_iqd!==null?'\n✅ المبلغ المعتمد: '+formatIQD(t.credited_amount_iqd):''}`;
   const rows=[];
   if(t.proof_file_id)rows.push([button('📷 عرض صورة الإثبات',`topup_photo:${id}`,'primary')]);
   if(t.status==='pending')rows.push([button('✅ مراجعة القبول',`topup_approve:${id}`,'success'),button('❌ رفض',`topup_reject:${id}`,'danger')]);
@@ -803,7 +807,7 @@ async function handleCallback(db,env,ctx,q){
       try{intent=await newTrc20Intent(db,uid,session.payload,selected,env)}
       catch(e){console.error('TRC20 intent not created',String(e));return sendText(env,uid,'⛔ تعذر تجهيز طلب TRC20. تأكد من العنوان والرسوم، أو استخدم وسيلة أخرى.');}
       if(session.payload.displayCurrency==='LYD'){
-        await db.prepare("UPDATE trc20_payment_intents SET display_currency='LYD',display_amount_minor=?,display_lyd_per_usd_milli=? WHERE id=? AND user_tg_id=?")
+        await db.prepare("UPDATE trc20_payment_intents SET display_lyd_amount_milli=?,display_lyd_per_usd_milli=? WHERE id=? AND user_tg_id=?")
           .bind(session.payload.displayMinor,session.payload.lydRateMilli,intent.intentId,uid).run();
       }
       if(session.payload.displayCurrency==='EGP'){
@@ -840,7 +844,7 @@ async function handleCallback(db,env,ctx,q){
     const row=await db.prepare("SELECT * FROM topup_requests WHERE id=? AND status='pending'").bind(id).first();
     if(!row)return sendText(env,uid,'الطلب غير متاح.');
     await setSession(db,uid,'owner_topup_amount',{id});
-    return sendText(env,uid,`✏️ أدخل المبلغ الذي وصل فعلياً بالدينار العراقي للطلب #${id}.\nالمبلغ المطلوب: ${formatIQD(row.amount_iqd)}${row.display_currency==='EGP'&&row.display_amount_minor?'\nعملة الزبون: '+formatEgpMinor(row.display_amount_minor):''}\nيمكنك اعتماد مبلغ أقل؛ مثال: 100000\nللإلغاء /cancel.`);
+    return sendText(env,uid,`✏️ أدخل المبلغ الذي وصل فعلياً بالدينار العراقي للطلب #${id}.\nالمبلغ المطلوب: ${formatIQD(row.amount_iqd)}${row.display_lyd_amount_milli!=null?'\nعملة الزبون: '+formatLydMilli(row.display_lyd_amount_milli):row.display_currency==='EGP'&&row.display_amount_minor?'\nعملة الزبون: '+formatEgpMinor(row.display_amount_minor):''}\nيمكنك اعتماد مبلغ أقل؛ مثال: 100000\nللإلغاء /cancel.`);
   }
   if(data.startsWith('topup_commit:')){const [,rawId,rawAmt]=data.split(':');return settleTopup(db,env,ctx,uid,Number(rawId),Number(rawAmt),q.message?.message_id)}
   if(data.startsWith('topup_reject:'))return settleTopup(db,env,ctx,uid,Number(data.split(':')[1]),null,q.message?.message_id);

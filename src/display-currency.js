@@ -74,8 +74,8 @@ export function rateFromVisual(settings){return parseEgpPerUsdMinor(settings?.eg
 export function lydRateFromVisual(settings){return parseLydPerUsdMilli(settings?.lyd_rate_per_usd??LYD_DEFAULT_RATE)}
 export function egpDisplayEnabled(settings){return settings?.egp_display_enabled==='true'}
 export function formatStoredQuote(row,viewCurrency='',usdIqd=null,egpPerUsdMinor=null){
- const currency=viewCurrency||row.display_currency||row.displayCurrency||row.currency||row.requested_currency;
- if(currency==='LYD'&&row.display_amount_minor!=null) return formatLydMilli(Number(row.display_amount_minor));
+ const currency=viewCurrency||(row.display_lyd_amount_milli!=null?'LYD':row.display_currency)||row.displayCurrency||row.currency||row.requested_currency;
+ if(currency==='LYD'&&row.display_lyd_amount_milli!=null) return formatLydMilli(Number(row.display_lyd_amount_milli));
  if(currency==='LYD'&&row.displayMinor!=null) return formatLydMilli(Number(row.displayMinor));
  if(currency==='EGP'&&row.display_amount_minor!=null)
    return formatEgpMinor(Number(row.display_amount_minor));

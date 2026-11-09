@@ -6,5 +6,7 @@ CREATE TABLE IF NOT EXISTS user_lyd_display(
 );
 -- Quote snapshots preserve the rate and displayed amount in LYD milli-dinars.
 ALTER TABLE topup_requests ADD COLUMN display_lyd_per_usd_milli INTEGER;
+ALTER TABLE topup_requests ADD COLUMN display_lyd_amount_milli INTEGER;
 ALTER TABLE trc20_payment_intents ADD COLUMN display_lyd_per_usd_milli INTEGER;
+ALTER TABLE trc20_payment_intents ADD COLUMN display_lyd_amount_milli INTEGER;
 -- Rate defaults are in code, not remote API. No existing balance is modified.
