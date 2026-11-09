@@ -35,14 +35,19 @@ export function egpQuoteToIQD(egpMinor,usdIqd,egpPerUsdMinor){
  const iqd=Math.round(egpMinor*usdIqd/egpPerUsdMinor);
  return Number.isSafeInteger(iqd)&&iqd>=1000&&iqd<=10000000?iqd:null;
 }
+export async function egpRate(db){
+ const row=await db.prepare("SELECT value FROM bot_settings WHERE key='egp_rate_per_usd'").first();
+ return parseEgpPerUsdMinor(row?.value);
+}
+export async function displayRate(db,currency){return currency==='EGP'?egpRate(db):null}
 export function rateFromVisual(settings){return parseEgpPerUsdMinor(settings?.egp_rate_per_usd)}
 export function egpDisplayEnabled(settings){return settings?.egp_display_enabled==='true'}
-export function formatStoredQuote(row,viewCurrency=''){
+export function formatStoredQuote(row,viewCurrency='',usdIqd=null,egpPerUsdMinor=null){
  const currency=viewCurrency||row.display_currency||row.displayCurrency||row.currency||row.requested_currency;
  if(currency==='EGP'&&row.display_amount_minor!=null)
    return formatEgpMinor(Number(row.display_amount_minor));
  if(currency==='EGP'&&row.displayMinor!=null)
    return formatEgpMinor(Number(row.displayMinor));
- return formatPreferredIQD(Number(row.amountIqd??row.amount_iqd||0),currency,
-   Number(row.rate??row.quoted_rate_iqd),Number(row.egpRateMinor??row.display_egp_per_usd_minor));
+ return formatPreferredIQD(Number(row.amountIqd??row.amount_iqd??0),currency,
+   Number(usdIqd??row.rate??row.quoted_rate_iqd),Number(egpPerUsdMinor??row.egpRateMinor??row.display_egp_per_usd_minor));
 }
