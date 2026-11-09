@@ -544,7 +544,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await topupSetup(db,env,uid,messageId);
   }
   else if(data==='admin_egp'){
-    const [raw,enabled]=await Promise.all([getSetting(db,'egp_rate_per_usd',''),getSetting(db,'egp_display_enabled','false')]);
+    const [raw,enabled]=await Promise.all([getSetting(db,'egp_rate_per_usd','54.24'),getSetting(db,'egp_display_enabled','true')]);
     const valid=parseEgpPerUsdMinor(raw);
     await sendOrEditText(env,uid,'🇪🇬 إدارة عملة الجنيه المصري\n\n💱 السعر الثابت: 1 USD = '+
       (valid?raw+' ج.م':'لم يحدد بعد')+'\n👁️ ظهور العملة: '+(enabled==='true'?'✅ مفعّل':'⏸️ معطّل')+
@@ -554,10 +554,17 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
         [button('⚙️ إعدادات الشحن','admin_topup_setup','primary')],adminBack),messageId);
   }
   else if(data==='admin_egp_toggle'){
-    const raw=await getSetting(db,'egp_rate_per_usd','');
+    const raw=await getSetting(db,'egp_rate_per_usd','54.24');
     if(!parseEgpPerUsdMinor(raw))return sendText(env,uid,'⚠️ حدّد سعر الجنيه المصري أولاً.');
-    const current=await getSetting(db,'egp_display_enabled','false');
-    await updateSetting(db,'egp_display_enabled',current==='true'?'false':'true',uid);
+    const current=await getSetting(db,'egp_display_enabled','true');
+    const next=current==='true'?'false':'true';
+    // One owner-only atomic toggle changes only the display overlay, never
+    // ledger balances, saved preferred USD/IQD values, or payment totals.
+    await db.batch([
+      db.prepare("INSERT INTO bot_settings(key,value,updated_by) VALUES('egp_display_enabled',?,?) "+
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP").bind(next,uid),
+      db.prepare('UPDATE user_egp_display SET enabled=?').bind(next==='true'?1:0)
+    ]);
     await audit(db,uid,'toggle_egp_display','setting',0);
     await handleAdminCallback(db,env,uid,'admin_egp',messageId);
   }

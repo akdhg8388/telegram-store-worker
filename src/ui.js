@@ -62,7 +62,7 @@ export async function home(db,env,uid,messageId=null) {
   const values={
     store:short(visual.store_name||env.STORE_NAME||'My Store',80),name:short(user?.first_name||choice(env,'مستخدم','User'),120),
     id:String(uid),users:shownUsers.toLocaleString('en-US'),
-    balance:display(balance),
+    balance:user?.currency_preference==='EGP'?display(balance):user?.currency_preference==='USD'?(rate?'$'+decimalMoney(balance/rate):'$—'):'IQD '+Number(balance).toLocaleString('en-US'),
     balance_iqd:decimalMoney(balance),balance_usd:rate?decimalMoney(balance/rate):choice(env,'غير محدد','Not configured'),
     instructions:short(visual.storefront_instructions||'',1200)
   };
@@ -164,7 +164,7 @@ export async function walletSummary(db,uid){
 }
 export async function currencyMenu(db,env,uid,messageId=null){
   const {currency,rate,egpRateMinor}=await walletSummary(db,uid);
-  const enabled=await getSetting(db,'egp_display_enabled','false')==='true';
+  const enabled=await getSetting(db,'egp_display_enabled','true')==='true';
   const note=rate?`💱 السعر المعتمد من الإدارة: 1 USD = ${formatIQD(rate)}`:'⚠️ سعر صرف الدولار غير مهيأ بعد.';
   const egpNote=enabled&&egpRateMinor?'\n🇪🇬 السعر الثابت: 1 USD = '+formatEgpMinor(egpRateMinor):'';
   const selected=currency==='EGP'?'🇪🇬 الجنيه المصري (EGP)':currency==='USD'?'🇺🇸 الدولار الأمريكي (USD)':'🇮🇶 الدينار العراقي (IQD)';

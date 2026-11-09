@@ -37,7 +37,7 @@ export function egpQuoteToIQD(egpMinor,usdIqd,egpPerUsdMinor){
 }
 export async function egpRate(db){
  const row=await db.prepare("SELECT value FROM bot_settings WHERE key='egp_rate_per_usd'").first();
- return parseEgpPerUsdMinor(row?.value);
+ return parseEgpPerUsdMinor(row?.value??EGP_DEFAULT_RATE);
 }
 export async function displayRate(db,currency){return currency==='EGP'?egpRate(db):null}
 export function rateFromVisual(settings){return parseEgpPerUsdMinor(settings?.egp_rate_per_usd)}

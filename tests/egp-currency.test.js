@@ -54,6 +54,7 @@ test('EGP rate belongs to the owner, no FX API, and default USD/IQD wallets surv
   await updateSetting(db,'egp_rate_per_usd','53.90',401);
   assert.equal(await egpRate(db),5390);
   await updateSetting(db,'egp_display_enabled','false',401);
+  c.prepare('UPDATE user_egp_display SET enabled=0 WHERE user_tg_id=401').run();
   assert.equal((await getUser(db,401)).currency_preference,'USD');
   assert.deepEqual(c.prepare('SELECT wallet_balance_iqd,currency_preference FROM users WHERE tg_id=401').get(),old);
   assert.equal(c.prepare('SELECT COUNT(*) n FROM wallet_ledger').get().n,0);
