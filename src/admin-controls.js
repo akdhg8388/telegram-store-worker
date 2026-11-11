@@ -411,7 +411,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
   else if(data==='admin_visual_reset') {
     await setSession(db,uid,'owner_home_reset');
     await sendOrEditText(env,uid,
-    '↩️ استعادة رسالة الترحيب الافتراضية\n\nسيُستبدل نص الترحيب المعدّل بقالب My Store الأصلي، دون تغيير رصيد أي مستخدم أو بياناته أو إعدادات الرموز المتحركة المستقلة.\n\nهل تؤكد الاستعادة؟',keyboard(
+    '↩️ استعادة رسالة الترحيب الافتراضية\n\nسيُستبدل نص الترحيب المعدّل بقالب Pixel Store الأصلي، دون تغيير رصيد أي مستخدم أو بياناته أو إعدادات الرموز المتحركة المستقلة.\n\nهل تؤكد الاستعادة؟',keyboard(
       [button('✅ نعم، استعادة الترحيب','admin_visual_reset_confirm','success')],
       [button('❌ إلغاء','admin_visuals','danger')]),messageId);
   }
