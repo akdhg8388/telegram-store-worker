@@ -1,6 +1,7 @@
 import {processUpdate} from './bot.js';
 import {flushOutbox} from './telegram.js';
 import {pollTrc20Payments} from './trc20-cron.js';
+import {releaseExpiredSuspensions} from './moderation.js';
 import {authorizeDeployRequest,finishTelegramFromWorker} from './telegram-deploy.js';
 
 export default {
@@ -40,6 +41,8 @@ export default {
   async scheduled(_event,env,ctx){
     if(!env.DB||!env.TELEGRAM_BOT_TOKEN)return;
     ctx.waitUntil((async()=>{
+      try{await releaseExpiredSuspensions(env.DB)}
+      catch(error){console.error('Suspension expiry notification failed',String(error))}
       try{await pollTrc20Payments(env.DB,env)}
       catch(error){console.error('TRC20 scheduled verification failed',String(error))}
       await flushOutbox(env.DB,env,25);
