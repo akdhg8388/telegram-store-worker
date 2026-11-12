@@ -60,7 +60,7 @@ export async function home(db,env,uid,messageId=null) {
   const shownUsers=Math.max(0,Number(count?.n||0)+adjustment);
   const balance=Number(user?.wallet_balance_iqd||0);
   const values={
-    store:short(visual.store_name||env.STORE_NAME||'Pixel-Store',80),name:short(user?.first_name||choice(env,'مستخدم','User'),120),
+    store:short(['My Store','Pixel Store'].includes(visual.store_name)?'Pixel-Store':visual.store_name||env.STORE_NAME||'Pixel-Store',80),name:short(user?.first_name||choice(env,'مستخدم','User'),120),
     id:String(uid),users:shownUsers.toLocaleString('en-US'),
     balance:['EGP','LYD'].includes(user?.currency_preference)?display(balance):user?.currency_preference==='USD'?(rate?'$'+decimalMoney(balance/rate):'$—'):'IQD '+Number(balance).toLocaleString('en-US'),
     balance_iqd:decimalMoney(balance),balance_usd:rate?decimalMoney(balance/rate):choice(env,'غير محدد','Not configured'),
