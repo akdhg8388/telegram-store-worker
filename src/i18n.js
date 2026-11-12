@@ -121,7 +121,7 @@ const pairs=[
 ['قيد المراجعة','Under Review'],['تمت الموافقة','Approved'],['مرفوض','Rejected'],['مكتمل','Complete'],
 ['✅ مكتمل','✅ Complete'],['⏳ بانتظار موافقة المدير','⏳ Awaiting Owner Approval'],
 ['📦 مدفوع — قيد التجهيز','📦 Paid — Preparing Delivery'],['↩️ مسترد','↩️ Refunded'],
-['د.ع','IQD'],['بتوقيت بغداد','Baghdad Time']
+['د.ع','IQD']
 ];
 const ordered=[...pairs,...ADMIN_EN].sort((a,b)=>b[0].length-a[0].length);
 export function translateUi(text,locale){

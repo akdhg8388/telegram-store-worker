@@ -513,7 +513,7 @@ async function settleTopup(db,env,ctx,uid,id,amount=null,messageId=null){
   const fx=await usdRate(db);
   const egp=customer?.currency_preference==='EGP'?await egpRate(db):customer?.currency_preference==='LYD'?await lydRate(db):null;
   const customerAmount=value=>formatPreferredIQD(value,customer?.currency_preference||'USD',fx,egp);
-  const notice=approved?`✅ تم شحن محفظتك بنجاح!\n\n🧾 رقم الطلب: #${id}\n💰 المبلغ المطلوب: ${customerAmount(current.amount_iqd)}\n✅ المبلغ المضاف فعلياً: ${customerAmount(amount)}\n💳 رصيد المحفظة: ${customerAmount(customer.wallet_balance_iqd)}\n💸 الوسيلة: ${settledName}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت الاعتماد: ${baghdadDate(current.decided_at)}\n🟢 الحالة: مكتملة\n\nشكراً لاستخدامك My Store.`
+  const notice=approved?`✅ تم شحن محفظتك بنجاح!\n\n🧾 رقم الطلب: #${id}\n💰 المبلغ المطلوب: ${customerAmount(current.amount_iqd)}\n✅ المبلغ المضاف فعلياً: ${customerAmount(amount)}\n💳 رصيد المحفظة: ${customerAmount(customer.wallet_balance_iqd)}\n💸 الوسيلة: ${settledName}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت الاعتماد: ${baghdadDate(current.decided_at)}\n🟢 الحالة: مكتملة\n\nشكراً لاستخدامك Pixel-Store.`
     :`❌ تم رفض طلب شحن المحفظة #${id}.\n\n💰 المبلغ المطلوب: ${customerAmount(current.amount_iqd)}\n🗓️ وقت الطلب: ${baghdadDate(current.created_at)}\n🕒 وقت القرار: ${baghdadDate(current.decided_at)}\nلم تتم إضافة أي مبلغ. للمساعدة افتح قسم الدعم.`;
   await notifyUser(db,current.user_tg_id,notice,keyboard([button('📦 طلباتي','orders','primary'),button('💳 محفظتي','wallet','success')]),approved?{entities:boldEntities(notice)}:{});
   // Financial commit and customer notification are already durable. Cleanup is
