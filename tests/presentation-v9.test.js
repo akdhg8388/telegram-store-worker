@@ -107,7 +107,7 @@ test('V17 Home links to customer private inbox and shows preserved messages, ima
    assert.match(txt,/📷 صورة/);
    assert.match(txt,/🎬 فيديو/);
    assert.doesNotMatch(txt,/خاص/);
-   assert.match(txt,/بتوقيت بغداد/);
+   assert.doesNotMatch(txt,/بتوقيت بغداد|[٠-٩۰-۹]/);
    const otherMediaId=conn.prepare('SELECT id FROM support_messages WHERE user_tg_id=102').get().id;
    await handleCustomerSupportCallback(db,environment,101,'my_support_media:'+otherMediaId);
    assert.ok(texts(calls).at(-1).includes('غير متوفر ضمن رسائلك'));
