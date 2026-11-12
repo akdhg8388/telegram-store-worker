@@ -26,7 +26,7 @@ export async function referralPage(db,env,uid,messageId=null){
  choice(env,'📜 مكافآت مستلمة: ','📜 Rewards earned: ')+(total?.n||0)];
  const shareUrl=link.startsWith('https://t.me/')?
    'https://t.me/share/url?url='+encodeURIComponent(link)+
-   '&text='+encodeURIComponent(choice(env,'🛍️ تعال إلى My Store من رابط دعوتي','🛍️ Join My Store with my invite link')):null;
+   '&text='+encodeURIComponent(choice(env,'🛍️ تعال إلى Pixel-Store من رابط دعوتي','🛍️ Join Pixel-Store with my invite link')):null;
  return sendOrEditText(env,uid,lines.join('\n'),keyboard(
  ...(shareUrl?[[urlButton(choice(env,'🔗 مشاركة رابط الإحالة','🔗 Share Referral Link'),shareUrl,'primary')]]:[]),
  [button(choice(env,'📜 سجل الأرباح','📜 Earnings History'),'referral_history','primary')],backRow()),messageId,{preserveText:true});

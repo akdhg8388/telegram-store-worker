@@ -150,7 +150,7 @@ test('V23 referral URL button shares the personal referral link via Telegram, in
    assert.equal(share.callback_data,undefined);
    const url=new URL(share.url);
    assert.equal(url.searchParams.get('url'),'https://t.me/MyStoreIQBot?start=ref_102');
-   assert.match(url.searchParams.get('text'),/My Store/);
+   assert.match(url.searchParams.get('text'),/Pixel-Store/);
    assert.ok(keyboard.some(x=>x.callback_data==='referral_history'));
    await referralPage(db,{...env,__locale:'en'},102);
    keyboard=calls.at(-1).body.reply_markup.inline_keyboard.flat();

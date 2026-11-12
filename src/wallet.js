@@ -77,12 +77,18 @@ export function parseCustomMinor(input,currency){
   const minor=Number(whole)*100+Number(fraction.padEnd(2,'0'));
   return Number.isSafeInteger(minor)?minor:null;
 }
+// Cached formatters avoid repeated Intl initialization on hot message paths.
+const baghdadFormatters={
+  ar:new Intl.DateTimeFormat('ar-IQ-u-nu-latn',{timeZone:'Asia/Baghdad',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true}),
+  en:new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Baghdad',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true})
+};
 export function baghdadDate(utcText,locale='ar'){
   if(!utcText)return 'غير متوفر';
-  const normalized=String(utcText).replace(' ','T')+(String(utcText).endsWith('Z')?'':'Z');
+  const raw=String(utcText).trim().replace(' ','T');
+  const normalized=/(?:Z|[+-]\d{2}:\d{2})$/i.test(raw)?raw:raw+'Z';
   const dt=new Date(normalized);
   if(!Number.isFinite(dt.getTime()))return short(utcText,35);
-  return new Intl.DateTimeFormat(locale==='en'?'en-US':'ar-IQ',{timeZone:'Asia/Baghdad',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true}).format(dt)+(locale==='en'?' (Baghdad time)':' (بتوقيت بغداد)');
+  return baghdadFormatters[locale==='en'?'en':'ar'].format(dt);
 }
 export function topupStatus(status){return ({pending:'⏳ قيد المراجعة',approved:'✅ تمت الموافقة',rejected:'❌ مرفوض'})[status]||status;}
 export function quoteOfRecord(row){return {

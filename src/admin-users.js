@@ -67,7 +67,7 @@ export async function handleUserCallback(db,env,uid,data,messageId=null){
     await clearSession(db,uid);
     if(result.meta?.changes){
       await audit(db,uid,action==='admin_confirm_ban'?'ban_permanent':'suspend_temporary','user',target);
-      await queueNotification(db,'sendMessage',{chat_id:target,text:action==='admin_confirm_ban'?'🚫 تم تعليق إمكانية استخدام My Store بشكل دائم.':'⏳ تم تعليق إمكانية استخدام My Store حتى '+baghdadDate(new Date(until*1000).toISOString())});
+      await queueNotification(db,'sendMessage',{chat_id:target,text:action==='admin_confirm_ban'?'🚫 تم تعليق إمكانية استخدام Pixel-Store بشكل دائم.':'⏳ تم تعليق إمكانية استخدام Pixel-Store حتى '+baghdadDate(new Date(until*1000).toISOString())});
     }
     await userDetail(db,env,uid,target,messageId);return true;
   }
@@ -78,7 +78,7 @@ export async function handleUserCallback(db,env,uid,data,messageId=null){
     await db.prepare('UPDATE users SET is_blocked=0,suspended_until=NULL,restriction_reason=\'\',restricted_by=NULL,restricted_at=NULL WHERE tg_id=? AND tg_id!=?')
       .bind(target,Number(env.ADMIN_ID)).run();
     await audit(db,uid,'unban','user',target);
-    await queueNotification(db,'sendMessage',{chat_id:target,text:'✅ تمت إعادة تفعيل حسابك في My Store. يمكنك استخدام المتجر الآن.'});
+    await queueNotification(db,'sendMessage',{chat_id:target,text:'✅ تمت إعادة تفعيل حسابك في Pixel-Store. يمكنك استخدام المتجر الآن.'});
     await userDetail(db,env,uid,target,messageId);return true;
   }
   return true;

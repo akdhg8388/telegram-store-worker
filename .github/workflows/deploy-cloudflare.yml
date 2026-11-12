@@ -1,4 +1,4 @@
-name: Deploy My Store to Cloudflare
+name: Deploy Pixel-Store to Cloudflare
 
 on:
   workflow_dispatch:
@@ -91,7 +91,7 @@ jobs:
       - name: Summary
         if: success()
         run: |
-          echo '### My Store deployment' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Pixel-Store deployment' >> "$GITHUB_STEP_SUMMARY"
           echo '- Worker and D1 deployed; migrations applied.' >> "$GITHUB_STEP_SUMMARY"
           echo '- Telegram webhook configured and health checked.' >> "$GITHUB_STEP_SUMMARY"
           echo '- Send /start, then /admin from the private owner account to verify.' >> "$GITHUB_STEP_SUMMARY"

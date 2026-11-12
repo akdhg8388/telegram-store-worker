@@ -12,8 +12,8 @@ const byId=new Map(targets.map(x=>[x.id,x]));
 const byAction=new Map(targets.map(x=>[x.action,x.id]));
 const defaultAr='🛠️ هذه الخدمة تحت الصيانة مؤقتاً.\nنعمل على تحسينها، يرجى المحاولة لاحقاً.';
 const defaultEn='🛠️ This service is temporarily under maintenance.\nWe are improving it. Please try again later.';
-const globalAr='🛠️ My Store تحت الصيانة مؤقتاً.\nيرجى المحاولة لاحقاً.';
-const globalEn='🛠️ My Store is temporarily under maintenance.\nPlease try again later.';
+const globalAr='🛠️ Pixel-Store تحت الصيانة مؤقتاً.\nيرجى المحاولة لاحقاً.';
+const globalEn='🛠️ Pixel-Store is temporarily under maintenance.\nPlease try again later.';
 const valid=id=>id==='global'||byId.has(id);
 const key=(id,field)=>id==='global'
   ?(field==='enabled'?'maintenance_enabled':field==='sticker'?'maintenance_global_sticker':'maintenance_message_'+field)

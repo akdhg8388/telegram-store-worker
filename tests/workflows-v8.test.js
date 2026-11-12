@@ -101,7 +101,7 @@ test('support admin replies are delivered, timestamped, and deletion clearly rep
     assert.ok(calls.some(c=>c.params?.chat_id===101&&String(c.params?.text).includes('نعم، متوفرة')));
     const reply=conn.prepare("SELECT * FROM support_messages WHERE direction='outgoing'").get();
     assert.equal(reply.admin_notice_message_id>0,true);
-    assert.match(baghdadDate(reply.created_at),/بغداد/);
+    assert.doesNotMatch(baghdadDate(reply.created_at),/بتوقيت بغداد|[٠-٩۰-۹]/);
   });}finally{conn.close()}
 });
 
