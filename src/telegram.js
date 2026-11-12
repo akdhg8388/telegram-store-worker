@@ -1,9 +1,37 @@
 import {translateTelegramParams,languageOf,userLanguage} from './i18n.js';
 const BASE = 'https://api.telegram.org/bot';
+// Latin/Eastern digit replacement is length-preserving for Telegram entities.
+export function latinDigits(text){
+  if(typeof text!=='string')return text;
+  return text.replace(/[٠-٩۰-۹]/g,ch=>{
+    const code=ch.charCodeAt(0);
+    return String(code>=0x6f0?code-0x6f0:code-0x660);
+  });
+}
+function normalizeDisplayParams(params){
+  let out=params;
+  for(const key of ['text','caption','title','description','error_message','explanation']){
+    if(typeof out[key]==='string'){
+      const normalized=latinDigits(out[key]);
+      if(normalized!==out[key])out={...out,[key]:normalized};
+    }
+  }
+  if(out.reply_markup?.inline_keyboard){
+    let changed=false;
+    const rows=out.reply_markup.inline_keyboard.map(row=>row.map(button=>{
+      const text=latinDigits(button.text);
+      if(text===button.text)return button;
+      changed=true;
+      return {...button,text};
+    }));
+    if(changed)out={...out,reply_markup:{...out.reply_markup,inline_keyboard:rows}};
+  }
+  return out;
+}
 export async function telegram(env, method, params) {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN is missing');
   const original=params;
-  params=translateTelegramParams(method,params,languageOf(env));
+  params=normalizeDisplayParams(translateTelegramParams(method,params,languageOf(env)));
   // Preserve full-message bold after locale translation changes string length.
   if(Array.isArray(original?.entities)&&original.entities.length===1&&original.entities[0].type==='bold'
      &&original.entities[0].offset===0&&original.entities[0].length===String(original.text||'').length
