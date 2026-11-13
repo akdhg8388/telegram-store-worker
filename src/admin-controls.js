@@ -530,7 +530,7 @@ export async function handleAdminCallback(db,env,uid,data,messageId=null){
     await handleAdminCallback(db,env,uid,'admin_pay:'+key,messageId);
   }
   else if(data.startsWith('admin_pay_toggle:')){
-    const [,key,field]=data.split(':');if(!['enabled','visible'].includes(field))return true;
+    const [,key,field]=data.split(':');if(!['enabled','visible'].includes(field) || key==='usdt_trc20')return true;
     await db.prepare(`UPDATE payment_methods SET ${field}=1-${field} WHERE method_key=?`).bind(key).run();
     await handleAdminCallback(db,env,uid,'admin_pay:'+key,messageId);
   }
