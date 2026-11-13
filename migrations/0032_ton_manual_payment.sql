@@ -18,7 +18,7 @@ UPDATE payment_methods
      name_en='Tether USDT (TON) via Bybit',
      receiver_ar='UQB8wsYDbBNZZK-vLLC_rqLbPFSdQ66zubIfs88neWP80kIE',receiver_en='UQB8wsYDbBNZZK-vLLC_rqLbPFSdQ66zubIfs88neWP80kIE',
      receiver_entities_ar='[]',receiver_entities_en='[]',
-     photo_file_id='https://raw.githubusercontent.com/akdhg8388/telegram-store-worker/main/assets/ton-usdt-bybit.png',
+     photo_file_id=CASE WHEN length(COALESCE(photo_file_id,''))>0 THEN photo_file_id ELSE 'https://raw.githubusercontent.com/akdhg8388/telegram-store-worker/main/assets/ton-usdt-bybit.png' END,
      pay_currency='USD',quote_enabled=1,
      fee_mode='none',fee_value=0,enabled=1,visible=1
  WHERE method_key=(

@@ -315,7 +315,7 @@ export async function topupTon(db,env,uid,quote,method,messageId=null){
     [button('✅ دفعت','topup_ton_paid:'+quote.quoteKey,'success')],
     [button('❌ إلغاء','topup_cancel','danger')]
   );
-  return sendPhotoCard(env,uid,TON_QR_URL,caption,markup,{
+  return sendPhotoCard(env,uid,method?.photo_file_id||TON_QR_URL,caption,markup,{
     messageId,preserveText:true,
     onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg);}
   });

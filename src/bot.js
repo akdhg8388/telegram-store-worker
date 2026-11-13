@@ -770,7 +770,7 @@ async function handleCallback(db,env,ctx,q){
       const intent=await findTrc20Intent(db,uid,id);
       return answerCallback(env,q.id,intent?'حوّل المبلغ المطلوب '+(intent.integer_only===1?String(intent.expected_micro/1000000)+' USDT':formatUsdtMicro(intent.expected_micro)):'انتهى الطلب');
     }
-    const ok=session?.action==='topup_evidence'&&session.payload?.quoteKey===id;
+    const ok=['topup_evidence','topup_ton_ready','topup_ton_txid'].includes(session?.action) && session.payload?.quoteKey===id;
     return answerCallback(env,q.id,ok?transferSummary(session.payload):'انتهت هذه الخطوة. ابدأ طلباً جديداً.');
   }
   if(data==='topup_cancel'){
