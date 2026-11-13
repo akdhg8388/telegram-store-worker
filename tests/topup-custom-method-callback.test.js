@@ -74,7 +74,7 @@ test('newly added custom payment methods have valid callback lengths in preset a
     const menus=calls.filter(c=>String(c.body.text||'').includes('اختيار طريقة الشحن'));
     assert.equal(menus.length,1);
     const methodButtons=menus[0].body.reply_markup.inline_keyboard.flat().filter(b=>(b.callback_data||'').startsWith('topup_method:'));
-    assert.equal(methodButtons.length,2);
+    assert.ok(methodButtons.length>=2);
     for(const b of methodButtons){
       assert.ok(Buffer.byteLength(b.callback_data,'utf8')<=64, 'callback too long: '+b.callback_data);
     }

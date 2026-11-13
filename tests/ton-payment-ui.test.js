@@ -113,7 +113,7 @@ test('TON UI supports QR and copy button; TXID queues owner review and no automa
    assert.equal(request.custom_method_key,'custom_ton_demo');
    assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,0);
    assert.ok(calls.some(c=>c.body.text?.includes('بانتظار مراجعة الإدارة')&&c.body.text?.includes('قريباً')));
-   assert.ok(calls.some(c=>c.body.chat_id===991 && (c.body.text||c.body.caption||'').includes('رقم الحوالة')));
+   assert.ok(calls.some(c=>String(c.body.chat_id)==='991' && (c.body.text||c.body.caption||'').includes('رقم الحوالة')));
    await send(callback(991,'topup_approve:'+request.id));
    await send(callback(991,'topup_commit:'+request.id+':15200'));
    assert.equal(conn.prepare('SELECT wallet_balance_iqd FROM users WHERE tg_id=101').get().wallet_balance_iqd,15200);
