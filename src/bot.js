@@ -26,6 +26,11 @@ import {gateState,showGate,handleChannelAdmin,handleChannelAdminText} from './re
 import {maintenanceStatus,maintenanceActionId,maintenanceCommandId,sendMaintenanceNotice,maintenanceAdminCallback,maintenanceAdminText} from './maintenance.js';
 import {termsPage} from './terms.js';
 
+// Quote token must fit Telegram's 64-byte callback_data limit even when method_key is 32 chars.
+// A 16-character random token leaves room for "topup_method:<method_key>:<token>" (max 62 bytes).
+const newTopupQuoteKey=()=>crypto.randomUUID().replaceAll('-','').slice(0,16);
+
+
 async function notifyAdmins(db,env,text,photoFileId=null,markup=null,metadata={}) {
   for(const admin of adminIds(env)) {
     if(photoFileId) await queueNotification(db,'sendPhoto',{chat_id:admin,photo:photoFileId,caption:short(text,950),...(markup?{reply_markup:markup}:{})},metadata);
@@ -133,7 +138,7 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     const conversion=current==='EGP'?await egpRate(db):current==='LYD'?await lydRate(db):null;
     const quote=current==='EGP'?egpTopupQuote(minor,rate,conversion):current==='LYD'?lydTopupQuote(minor,rate,conversion):quoteMinor(current,minor,rate);
     if(!quote)return sendText(env,uid,current==='LYD'?'❌ أدخل مبلغاً صحيحاً بالدينار الليبي، مثل 50 أو 50.500، ضمن حدود شحن المحفظة.':current==='EGP'?'❌ أدخل مبلغاً صحيحاً بالجنيه المصري، مثل 500 أو 500.50، ضمن حدود شحن المحفظة.':current==='USD'?'أدخل مبلغاً صحيحاً بين 1 و1,000 دولار، مثل 25 أو 25.50.':'أدخل مبلغاً صحيحاً بالدينار، بين 1,000 و10,000,000، دون فواصل عشرية.');
-    const extended={...quote,quoteKey:crypto.randomUUID()};
+    const extended={...quote,quoteKey:newTopupQuoteKey()};
     await setSession(db,uid,'topup_choose_method',extended);
     return ui.topupMethods(db,env,uid,extended);
   }
@@ -773,7 +778,7 @@ async function handleCallback(db,env,ctx,q){
     const base=quoteFromUSD(usd,w.rate,['EGP','LYD'].includes(w.currency)?'IQD':w.currency);
     const quote=base&&w.currency==='EGP'&&w.egpRateMinor?{...base,displayCurrency:'EGP',displayMinor:usd*w.egpRateMinor,egpRateMinor:w.egpRateMinor}:base&&w.currency==='LYD'&&w.egpRateMinor?{...base,displayCurrency:'LYD',displayMinor:usd*w.egpRateMinor,lydRateMilli:w.egpRateMinor}:base;
     if(!quote||['EGP','LYD'].includes(w.currency)&&!w.egpRateMinor)return sendText(env,uid,'لا يمكن تحديد المبلغ قبل ضبط سعر الصرف.');
-    const extended={...quote,quoteKey:crypto.randomUUID()};
+    const extended={...quote,quoteKey:newTopupQuoteKey()};
     await setSession(db,uid,'topup_choose_method',extended);
     return ui.topupMethods(db,env,uid,extended,q.message?.message_id);
   }
