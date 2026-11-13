@@ -15,6 +15,7 @@ import {USD_PRESETS,formatUSD,formatQuote,usdRate,isTopupEnabled,receiverFor,PAY
 import {egpRate,lydRate,lydRateFromVisual,rateFromVisual,formatEgpMinor,formatLydMilli,formatPreferredIQD,egpDisplayEnabled} from './display-currency.js';
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 import {sendPhotoCard,cardEntities} from './product-card.js';
+import {TON_ADDRESS,TON_QR_URL} from './ton-payment.js';
 import {isMaintenanceButtonEnabled} from './maintenance.js';
 
 // Temporary navigation messages are tracked in the background; never track receipts.
@@ -300,6 +301,26 @@ export async function topupTrc20(db,env,uid,intent,quote,messageId=null){
    onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg)}
  });
 }
+// Compact, normal-weight manual USDT/TON card. No countdown or expiry.
+export async function topupTon(db,env,uid,quote,method,messageId=null){
+  const transfer=Number.isSafeInteger(quote.transferTotalMinor)
+    ?(quote.transferTotalMinor/100).toFixed(2)+' Tether USDT'
+    :formatQuote(quote);
+  const caption='💳 الدفع عبر Bybit\n\n🪙 العملة: Tether USDT\n🌐 الشبكة: TON\n💰 مبلغ التحويل: '+transfer+
+    '\n\n📥 عنوان المحفظة:\n'+TON_ADDRESS+
+    '\n\n⚠️ حوّل Tether USDT عبر شبكة TON فقط، وتأكد من العنوان قبل الدفع.';
+  const markup=keyboard(
+    [{text:'📋 نسخ عنوان المحفظة',copy_text:{text:TON_ADDRESS},style:'primary'}],
+    [button('💸 المبلغ المطلوب: '+transfer,'topup_amount_info:'+quote.quoteKey,'success')],
+    [button('✅ دفعت','topup_ton_paid:'+quote.quoteKey,'success')],
+    [button('❌ إلغاء','topup_cancel','danger')]
+  );
+  return sendPhotoCard(env,uid,method?.photo_file_id||TON_QR_URL,caption,markup,{
+    messageId,preserveText:true,
+    onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg);}
+  });
+}
+
 export async function topupEvidence(db,env,uid,quote,method,messageId=null){
  const [m,instructions]=await Promise.all([paymentMethod(db,env,method),getSetting(db,'topup_instructions','')]);
  if(!m?.enabled||!m.visible||!m.receiver?.trim())return transientText(env,uid,'هذه الوسيلة غير متاحة حالياً.',keyboard(backRow()),messageId);
@@ -310,11 +331,10 @@ export async function topupEvidence(db,env,uid,quote,method,messageId=null){
  const footer=lang==='en'?'📸 Send the transfer reference or a payment-proof photo. An administrator will verify receipt before crediting your wallet.':'📸 أرسل الآن رقم التحويل أو صورة إثبات الحوالة. سيتحقق المدير من وصول المبلغ قبل إضافته للمحفظة.';
  const transfer=transferSummary(quote);
  const plain=`${title}${name}\n\n💰 ${lang==='en'?'Amount':'المبلغ'}: ${formatQuote(quote)}${transfer?'\n'+transfer:''}\n${body}\n${short(receiver,620)}\n\n${footer}${instructions?'\n\n'+short(instructions,500):''}`;
- const bold=[{type:'bold',offset:0,length:plain.length}];
  const raw=lang==='en'&&m.receiver_en?.trim()?m.receiver_entities_en:m.receiver_entities_ar;
  let emoji=[];
  try{emoji=JSON.parse(raw||'[]').filter(e=>e.type==='custom_emoji'&&e.offset>=0&&e.length>0&&e.offset+e.length<=receiver.length).map(e=>({...e,offset:e.offset+plain.indexOf(receiver)}));}catch{}
- const options={entities:[...bold,...emoji],preserveText:true};
+ const options={entities:emoji,preserveText:true};
  const markup=keyboard(
    ...(quote.transferCurrency&&Number.isSafeInteger(quote.transferTotalMinor)
       ?[[button('💸 المطلوب تحويله: '+formatTransferMinor(quote.transferTotalMinor,quote.transferCurrency),
