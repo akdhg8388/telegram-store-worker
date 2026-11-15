@@ -42,9 +42,24 @@ export async function telegram(env, method, params) {
   const request={...params};
   if(request.reply_markup?.inline_keyboard)request.reply_markup={...request.reply_markup,
     inline_keyboard:request.reply_markup.inline_keyboard.map(row=>row.map(({_emoji_fallback_text,...btn})=>btn))};
-  const response = await fetch(`${BASE}${env.TELEGRAM_BOT_TOKEN}/${method}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request)
-  });
+  // Upload locally bundled payment QR images directly, avoiding slow or failed
+  // Telegram downloads from external image hosts. All other methods stay JSON.
+  const inline=request.photo && typeof request.photo==='object' && typeof request.photo.base64==='string'
+    ?request.photo:null;
+  let payload;
+  if(inline){
+    const bytes=Uint8Array.from(atob(inline.base64),ch=>ch.charCodeAt(0));
+    const form=new FormData();
+    for(const [key,value] of Object.entries(request)){
+      if(key==='photo'||key==='_preserve_text')continue;
+      form.append(key,typeof value==='object'?JSON.stringify(value):String(value));
+    }
+    form.append('photo',new Blob([bytes],{type:'image/png'}),inline.filename||'payment-qr.png');
+    payload={method:'POST',body:form};
+  }else{
+    payload={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)};
+  }
+  const response = await fetch(`${BASE}${env.TELEGRAM_BOT_TOKEN}/${method}`,payload);
   const data = await response.json().catch(() => null);
   if (!response.ok || data?.ok !== true) {
     // Unsupported custom emoji icons should never make the store inaccessible.

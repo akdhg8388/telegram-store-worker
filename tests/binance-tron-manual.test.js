@@ -34,6 +34,8 @@ test('Binance USDT TRON method is separate, enabled, and never resurrects auto T
   assert.equal(binance.receiver,TRON_ADDRESS);
   assert.equal(binance.photo_file_id,TRON_QR_URL);
   assert.equal(binance.pay_currency,'USD');
+  assert.equal(binance.name_ar,'TRON شبكة Binance');
+  assert.equal(binance.name_en,'TRON شبكة Binance');
   assert.ok(isTronManualPaymentMethod(binance));
   assert.equal(isTronManualPaymentMethod(await paymentMethod(db,{},'usdt_trc20')),false);
   const list=await methodList(db,{}, {activeOnly:true});
@@ -54,8 +56,19 @@ test('Binance TRON payment displays normal-weight QR and copy button; TXID enter
  const {db,conn}=fixture();
  const previous=globalThis.fetch,calls=[];
  globalThis.fetch=async(url,options)=>{
-   const body=JSON.parse(options.body);
    const method=String(url).split('/').at(-1);
+   let body;
+   if(options.body instanceof FormData){
+     const image=options.body.get('photo');
+     assert.ok(image instanceof Blob);
+     assert.equal(image.type,'image/png');
+     const bytes=new Uint8Array(await image.arrayBuffer());
+     assert.equal(bytes.length,2533);
+     assert.deepEqual(Array.from(bytes.slice(0,8)),[137,80,78,71,13,10,26,10]);
+     body={...Object.fromEntries(options.body.entries()),
+       photo:{filename:image.name,size:image.size}};
+     body.reply_markup=JSON.parse(body.reply_markup);
+   }else body=JSON.parse(options.body);
    calls.push({body,method});
    for(const row of body.reply_markup?.inline_keyboard||[])
      for(const btn of row)if(btn.callback_data)assert.ok(Buffer.byteLength(btn.callback_data,'utf8')<=64);
@@ -84,7 +97,8 @@ test('Binance TRON payment displays normal-weight QR and copy button; TXID enter
    await send(callback(101,selected.callback_data));
    const card=calls.find(c=>c.method==='sendPhoto'&&c.body.caption?.includes('الدفع عبر Binance'));
    assert.ok(card,'Must show Binance QR payment card');
-   assert.equal(card.body.photo,TRON_QR_URL);
+   assert.equal(card.body.photo.filename,'binance-tron-usdt.png');
+   assert.equal(card.body.photo.size,2533);
    assert.ok(card.body.caption.includes(TRON_ADDRESS));
    assert.ok(card.body.caption.includes('Tether USDT'));
    assert.ok(card.body.caption.includes('TRON (TRC20)'));

@@ -854,13 +854,15 @@ async function handleCallback(db,env,ctx,q){
     return sendText(env,uid,'🧾 أرسل رقم المعاملة (TXID) بعد التحويل عبر Binance على شبكة TRON (TRC20).\n\nسيُراجع الطلب من الإدارة قبل إضافة الرصيد.');
   }
   if(data.startsWith('topup_method:')){
-    await trackTopupView(db,uid,q.message?.message_id);
+    // Tracking is non-critical for the payment action; do not serialize a D1 write
+    // before checking the session and sending the QR photo.
+    ctx.waitUntil(trackTopupView(db,uid,q.message?.message_id).catch(e=>console.error('Topup view tracking',String(e))));
     const [,method,quoteKey]=data.split(':');
     const session=await getSession(db,uid);
     if(!session || session.action!=='topup_choose_method' || session.payload.quoteKey!==quoteKey)return sendText(env,uid,'انتهت هذه الخطوة. افتح شحن المحفظة وحدد المبلغ أولاً.');
     const selected=await paymentMethod(db,env,method);
     if(!selected?.enabled||!selected.visible)return sendText(env,uid,'هذه الوسيلة غير متاحة حالياً.');
-    if(!await receiverFor(db,env,method))return sendText(env,uid,'هذه الوسيلة غير مهيأة لدى الإدارة بعد.');
+    if(!String(selected.receiver||'').trim())return sendText(env,uid,'هذه الوسيلة غير مهيأة لدى الإدارة بعد.');
     if(isTrc20Method(method)){
       if(!env.TRONGRID_API_KEY)return sendText(env,uid,'⛔ التحقق من TRC20 غير متاح حالياً. اختر وسيلة أخرى.');
       let intent;
