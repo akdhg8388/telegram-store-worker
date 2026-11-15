@@ -17,6 +17,7 @@ import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 import {sendPhotoCard,cardEntities} from './product-card.js';
 import {TON_ADDRESS,TON_QR_URL} from './ton-payment.js';
 import {TRON_ADDRESS,TRON_QR_URL} from './tron-payment.js';
+import {BINANCE_TRON_QR_BASE64} from './binance-tron-qr.js';
 import {isMaintenanceButtonEnabled} from './maintenance.js';
 
 // Temporary navigation messages are tracked in the background; never track receipts.
@@ -336,7 +337,7 @@ export async function topupTronManual(db,env,uid,quote,method,messageId=null){
     [button('✅ دفعت','topup_tron_paid:'+quote.quoteKey,'success')],
     [button('❌ إلغاء','topup_cancel','danger')]
   );
-  return sendPhotoCard(env,uid,method?.photo_file_id||TRON_QR_URL,caption,markup,{
+  return sendPhotoCard(env,uid,{base64:BINANCE_TRON_QR_BASE64,filename:'binance-tron-usdt.png'},caption,markup,{
     messageId,preserveText:true,
     onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg);}
   });
