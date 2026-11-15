@@ -19,6 +19,7 @@ import {boldEntities} from './v25-format.js';
 import {paymentMethod,paymentName} from './payment-methods.js';
 import {paymentQuote,transferSummary} from './payment-quote.js';
 import {isTonPaymentMethod,validTonTransactionId} from './ton-payment.js';
+import {isTronManualPaymentMethod,validTronTxid} from './tron-payment.js';
 import {trackTopupView,cleanTopupViews} from './topup-cleanup.js';
 import {isTrc20Method,newTrc20Intent,findTrc20Intent,cancelTrc20Intent,trc20TxidIsValid,verifyTrc20Payment,creditVerifiedTrc20,acceptVerifiedTrc20Part,trc20PaymentProgress,formatUsdtMicro,notifyTrc20Alert} from './trc20-payments.js';
 import {settleTrc20Single} from './trc20-single.js';
@@ -105,7 +106,8 @@ async function writeTopup(db,env,ctx,uid,session,sourceMessageId=null){
   const text=`🔔 طلب شحن محفظة جديد #${id}\n\n👤 الاسم: ${short(u?.first_name,100)}\n🔗 المعرف: ${u?.username?'@'+u.username:'غير متوفر'}\n🆔 Telegram ID: ${uid}\n💸 الوسيلة: ${methodLabel}\n💰 المطلوب: ${formatQuote(p)}${['EGP','LYD'].includes(p.displayCurrency)?' (مرجع محاسبي: '+formatIQD(p.amountIqd)+')':''}${transferSummary(p)?'\n'+transferSummary(p):''}\n🔢 رقم الحوالة: ${short(p.reference||'غير مرفق',180)}\n📷 الإثبات: ${p.proofFileId?'صورة مرفقة':'رقم تحويل فقط'}\n🗓️ وقت الطلب: ${baghdadDate(record.created_at)}\n\n⚠️ تحقق من وصول الحوالة فعلياً قبل الموافقة.`;
   await notifyAdmins(db,env,text,p.proofFileId||null,keyboard([button('📋 فتح طلب الشحن',`topup_detail:${id}`,'primary')]),{topupRequestId:id});
   ctx.waitUntil(flushOutbox(db,env));
-  const isTon=isTonPaymentMethod(await paymentMethod(db,env,p.method));
+  const selectedCrypto=await paymentMethod(db,env,p.method);
+  const isTon=isTonPaymentMethod(selectedCrypto)||isTronManualPaymentMethod(selectedCrypto);
   const confirmation=await sendText(env,uid,isTon
     ?'✅ تم استلام طلب الشحن بنجاح.\n⏳ طلبك بانتظار مراجعة الإدارة، وسيتم شحن محفظتك قريباً بعد الموافقة.'
     :`🟡 تم إرسال طلب الشحن #${id} للمراجعة.\n\n💰 ${formatQuote(p)}${transferSummary(p)?'\n'+transferSummary(p):''}\n💸 ${methodLabel}\n🗓️ ${baghdadDate(record.created_at)}\n\nتابع حالته من «طلباتي».`,keyboard([button('📦 طلباتي','orders','primary')],backRow()));
@@ -253,6 +255,19 @@ async function handleTextState(db,env,ctx,uid,message,session) {
     return sendText(env,uid,'✅ اكتملت جميع دفعات USDT، وتم شحن محفظتك تلقائياً!\n💰 المضاف: '+shown(payment.topup.amount_iqd)+
       '\n💳 رصيدك: '+shown(account.wallet_balance_iqd)+'\n🧾 رقم الطلب: #'+payment.topup.id,
       keyboard([button('💳 محفظتي','wallet','success')],[button('📦 طلباتي','orders','primary')]));
+  }
+  if(session.action==='topup_tron_txid'){
+    const value=String(message.text||'').trim();
+    if(!validTronTxid(value))
+      return sendText(env,uid,'🧾 أرسل رقم المعاملة (TXID) الصحيح المكون من 64 خانة من سجل التحويل على شبكة TRON.');
+    const selected=await paymentMethod(db,env,session.payload.method);
+    if(!selected?.enabled||!selected?.visible||!isTronManualPaymentMethod(selected))
+      return sendText(env,uid,'هذه الوسيلة غير متاحة حالياً؛ اختر وسيلة أخرى من المحفظة.');
+    const duplicate=await db.prepare("SELECT id FROM topup_requests WHERE transfer_reference=? AND status!='rejected' LIMIT 1").bind(value).first();
+    if(duplicate)return sendText(env,uid,'⚠️ رقم المعاملة هذا مسجّل سابقاً. لا يمكن تقديم طلب شحن آخر بنفس المعاملة.');
+    await trackTopupView(db,uid,message.message_id);
+    const payload={...session.payload,reference:value,nonce:session.payload.nonce||crypto.randomUUID()};
+    return writeTopup(db,env,ctx,uid,{payload},message.message_id);
   }
   if(session.action==='topup_ton_txid'){
     const value=String(message.text||'').trim();
@@ -770,7 +785,7 @@ async function handleCallback(db,env,ctx,q){
       const intent=await findTrc20Intent(db,uid,id);
       return answerCallback(env,q.id,intent?'حوّل المبلغ المطلوب '+(intent.integer_only===1?String(intent.expected_micro/1000000)+' USDT':formatUsdtMicro(intent.expected_micro)):'انتهى الطلب');
     }
-    const ok=['topup_evidence','topup_ton_ready','topup_ton_txid'].includes(session?.action) && session.payload?.quoteKey===id;
+    const ok=['topup_evidence','topup_ton_ready','topup_ton_txid','topup_tron_ready','topup_tron_txid'].includes(session?.action) && session.payload?.quoteKey===id;
     return answerCallback(env,q.id,ok?transferSummary(session.payload):'انتهت هذه الخطوة. ابدأ طلباً جديداً.');
   }
   if(data==='topup_cancel'){
@@ -827,6 +842,17 @@ async function handleCallback(db,env,ctx,q){
     await setSession(db,uid,'topup_ton_txid',session.payload);
     return sendText(env,uid,'🧾 أرسل رقم المعاملة (TXID) بعد التحويل، أو رابط العملية من شبكة TON.\n\nسيُراجع الطلب من الإدارة قبل إضافة الرصيد.');
   }
+  if(data.startsWith('topup_tron_paid:')){
+    if(!await isTopupEnabled(db,env))return sendText(env,uid,'⛔ شحن المحفظة غير متاح حالياً.');
+    const quoteKey=data.slice('topup_tron_paid:'.length);
+    const session=await getSession(db,uid);
+    const selected=session?.payload?.method?await paymentMethod(db,env,session.payload.method):null;
+    if(session?.action!=='topup_tron_ready'||session.payload.quoteKey!==quoteKey||
+       !selected?.enabled||!selected?.visible||!isTronManualPaymentMethod(selected))
+      return sendText(env,uid,'انتهت هذه الخطوة؛ افتح شحن المحفظة وحدد المبلغ مجدداً.');
+    await setSession(db,uid,'topup_tron_txid',session.payload);
+    return sendText(env,uid,'🧾 أرسل رقم المعاملة (TXID) بعد التحويل عبر Binance على شبكة TRON (TRC20).\n\nسيُراجع الطلب من الإدارة قبل إضافة الرصيد.');
+  }
   if(data.startsWith('topup_method:')){
     await trackTopupView(db,uid,q.message?.message_id);
     const [,method,quoteKey]=data.split(':');
@@ -855,6 +881,10 @@ async function handleCallback(db,env,ctx,q){
     if(selected.quote_enabled!==0&&!transfer)return sendText(env,uid,'⚠️ إعداد احتساب مبلغ التحويل غير صالح؛ تواصل مع الإدارة.');
     const payload={...session.payload,method,reference:null,proofFileId:null,proofUniqueId:null,
        ...(transfer?{transferCurrency:transfer.currency,transferBaseMinor:transfer.baseMinor,transferFeeMinor:transfer.feeMinor,transferTotalMinor:transfer.totalMinor}:{})};
+    if(isTronManualPaymentMethod(selected)){
+      await setSession(db,uid,'topup_tron_ready',payload);
+      return ui.topupTronManual(db,env,uid,payload,selected,q.message?.message_id);
+    }
     if(isTonPaymentMethod(selected)){
       await setSession(db,uid,'topup_ton_ready',payload);
       return ui.topupTon(db,env,uid,payload,selected,q.message?.message_id);

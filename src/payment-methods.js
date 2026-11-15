@@ -30,7 +30,7 @@ export function paymentButton(m,lang,callback){
 }
 export async function methodList(db,env,{activeOnly=false}={}){
  const rows=((await db.prepare('SELECT * FROM payment_methods ORDER BY sort_order,method_key LIMIT 60').all()).results||[])
-   .filter(x=>x.method_key!=='usdt_trc20' && !/TRC20/i.test(String(x.name_ar||'')+' '+String(x.name_en||'')));
+   .filter(x=>x.method_key!=='usdt_trc20' && (x.method_key==='binance_tron' || !/TRC20/i.test(String(x.name_ar||'')+' '+String(x.name_en||''))));
  const legacyKeys=rows.filter(x=>x.legacy_setting_key&&(!x.receiver_ar)).map(x=>x.legacy_setting_key);
  const values=await Promise.all(legacyKeys.map(k=>getSetting(db,k,String(env[defaults[rows.find(x=>x.legacy_setting_key===k)?.method_key]]||''))));
  const fallback=Object.fromEntries(legacyKeys.map((k,i)=>[k,values[i]]));
