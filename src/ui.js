@@ -16,6 +16,7 @@ import {egpRate,lydRate,lydRateFromVisual,rateFromVisual,formatEgpMinor,formatLy
 import {purchaseAvailability,priceDisplay} from './wallet-purchase.js';
 import {sendPhotoCard,cardEntities} from './product-card.js';
 import {TON_ADDRESS,TON_QR_URL} from './ton-payment.js';
+import {TRON_ADDRESS,TRON_QR_URL} from './tron-payment.js';
 import {isMaintenanceButtonEnabled} from './maintenance.js';
 
 // Temporary navigation messages are tracked in the background; never track receipts.
@@ -316,6 +317,26 @@ export async function topupTon(db,env,uid,quote,method,messageId=null){
     [button('❌ إلغاء','topup_cancel','danger')]
   );
   return sendPhotoCard(env,uid,method?.photo_file_id||TON_QR_URL,caption,markup,{
+    messageId,preserveText:true,
+    onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg);}
+  });
+}
+
+// Same compact, unformatted card as Bybit TON; manual owner review only.
+export async function topupTronManual(db,env,uid,quote,method,messageId=null){
+  const transfer=Number.isSafeInteger(quote.transferTotalMinor)
+    ?(quote.transferTotalMinor/100).toFixed(2)+' Tether USDT'
+    :formatQuote(quote);
+  const caption='💳 الدفع عبر Binance\n\n🪙 العملة: Tether USDT\n🌐 الشبكة: TRON (TRC20)\n💰 مبلغ التحويل: '+transfer+
+    '\n\n📥 عنوان المحفظة:\n'+TRON_ADDRESS+
+    '\n\n⚠️ حوّل Tether USDT عبر شبكة TRON (TRC20) فقط، وتأكد من العنوان قبل الدفع.';
+  const markup=keyboard(
+    [{text:'📋 نسخ عنوان المحفظة',copy_text:{text:TRON_ADDRESS},style:'primary'}],
+    [button('💸 المبلغ المطلوب: '+transfer,'topup_amount_info:'+quote.quoteKey,'success')],
+    [button('✅ دفعت','topup_tron_paid:'+quote.quoteKey,'success')],
+    [button('❌ إلغاء','topup_cancel','danger')]
+  );
+  return sendPhotoCard(env,uid,method?.photo_file_id||TRON_QR_URL,caption,markup,{
     messageId,preserveText:true,
     onMessage:async msg=>{env.__trackTransient?.(uid,msg);await env.__trackTopup?.(uid,msg);}
   });
